@@ -8,6 +8,7 @@ import { getRelativeDateDescription } from '../../utils/date';
 function PaymentItem({ payment }: { payment: ReturnType<typeof useUpcomingPayments>[0] }) {
   const order = useOrder(payment.orderId);
   const markPaymentPaid = useBNPLStore((state) => state.markPaymentPaid);
+  const openOrderDetailModal = useBNPLStore((state) => state.openOrderDetailModal);
   const platforms = useBNPLStore((state) => state.platforms);
 
   const platform = platforms.find((p) => p.id === payment.platformId);
@@ -15,15 +16,21 @@ function PaymentItem({ payment }: { payment: ReturnType<typeof useUpcomingPaymen
   const isToday = relativeDate === 'Today';
   const isTomorrow = relativeDate === 'Tomorrow';
 
-  const handleMarkPaid = async () => {
+  const handleMarkPaid = async (e: React.MouseEvent) => {
+    e.stopPropagation();
     await markPaymentPaid(payment.id);
+  };
+
+  const handleRowClick = () => {
+    openOrderDetailModal(payment.orderId);
   };
 
   return (
     <div
+      onClick={handleRowClick}
       className={`
-        flex items-center justify-between p-3 rounded-lg
-        ${isToday ? 'bg-blue-500/10 border border-blue-500/30' : 'bg-dark-hover'}
+        flex items-center justify-between p-3 rounded-lg cursor-pointer transition-colors
+        ${isToday ? 'bg-blue-500/10 border border-blue-500/30 hover:bg-blue-500/20' : 'bg-dark-hover hover:bg-dark-hover/70'}
       `}
     >
       <div className="flex items-center gap-3">

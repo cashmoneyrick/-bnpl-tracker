@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Layout } from './components/layout/Layout';
 import { ErrorBoundary } from './components/shared/ErrorBoundary';
 import { QuickAddModal } from './components/modals/QuickAddModal';
+import { OrderDetailModal } from './components/modals/OrderDetailModal';
 import { DashboardPage } from './pages/DashboardPage';
 import { CalendarPage } from './pages/CalendarPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
@@ -25,6 +26,9 @@ function App() {
         </ErrorBoundary>
         <ErrorBoundary>
           <QuickAddModal />
+        </ErrorBoundary>
+        <ErrorBoundary>
+          <OrderDetailModal />
         </ErrorBoundary>
       </div>
     </BrowserRouter>

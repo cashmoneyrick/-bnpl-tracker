@@ -24,6 +24,8 @@ interface BNPLStore {
 
   // UI State
   quickAddModalOpen: boolean;
+  orderDetailModalOpen: boolean;
+  selectedOrderId: string | null;
 
   // Actions
   initialize: () => Promise<void>;
@@ -45,6 +47,8 @@ interface BNPLStore {
   // UI Actions
   openQuickAddModal: () => void;
   closeQuickAddModal: () => void;
+  openOrderDetailModal: (orderId: string) => void;
+  closeOrderDetailModal: () => void;
 
   // Data Operations
   exportData: () => Promise<ExportedData>;
@@ -63,6 +67,8 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
 
   // UI State
   quickAddModalOpen: false,
+  orderDetailModalOpen: false,
+  selectedOrderId: null,
 
   // Initialize store from IndexedDB
   initialize: async () => {
@@ -400,6 +406,10 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
   // UI Actions
   openQuickAddModal: () => set({ quickAddModalOpen: true }),
   closeQuickAddModal: () => set({ quickAddModalOpen: false }),
+  openOrderDetailModal: (orderId: string) =>
+    set({ orderDetailModalOpen: true, selectedOrderId: orderId }),
+  closeOrderDetailModal: () =>
+    set({ orderDetailModalOpen: false, selectedOrderId: null }),
 
   // Export all data
   exportData: async () => {

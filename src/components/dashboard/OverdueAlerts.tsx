@@ -12,17 +12,26 @@ function OverdueItem({
 }) {
   const order = useOrder(payment.orderId);
   const markPaymentPaid = useBNPLStore((state) => state.markPaymentPaid);
+  const openOrderDetailModal = useBNPLStore((state) => state.openOrderDetailModal);
   const platforms = useBNPLStore((state) => state.platforms);
 
   const platform = platforms.find((p) => p.id === payment.platformId);
   const overdueText = getRelativeDateDescription(payment.dueDate);
 
-  const handleMarkPaid = async () => {
+  const handleMarkPaid = async (e: React.MouseEvent) => {
+    e.stopPropagation();
     await markPaymentPaid(payment.id);
   };
 
+  const handleRowClick = () => {
+    openOrderDetailModal(payment.orderId);
+  };
+
   return (
-    <div className="flex items-center justify-between p-3 rounded-lg bg-red-500/10 border border-red-500/30">
+    <div
+      onClick={handleRowClick}
+      className="flex items-center justify-between p-3 rounded-lg bg-red-500/10 border border-red-500/30 cursor-pointer hover:bg-red-500/20 transition-colors"
+    >
       <div className="flex items-center gap-3">
         <span
           className="w-2.5 h-2.5 rounded-full"
