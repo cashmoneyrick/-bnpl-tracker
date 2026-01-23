@@ -29,14 +29,99 @@ export function QuickAddModal() {
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Affirm-specific state
-  const [customInstallments, setCustomInstallments] = useState(4);
+  // Custom installments (0 means use platform default)
+  const [customInstallments, setCustomInstallments] = useState(0);
   const [aprInput, setAprInput] = useState('0');
 
   // Manual overrides - tracks which payments have been manually edited
   const [overrides, setOverrides] = useState<
     Record<number, { amount?: number; dueDate?: string }>
   >({});
+
+  // JSON input state
+  const [showJsonInput, setShowJsonInput] = useState(false);
+  const [jsonInput, setJsonInput] = useState('');
+  const [jsonError, setJsonError] = useState<string | null>(null);
+
+  // Valid platform IDs for JSON validation
+  const VALID_PLATFORM_IDS = ['afterpay', 'sezzle', 'klarna', 'zip', 'four', 'affirm'] as const;
+
+  // Parse and validate order JSON
+  const parseOrderJson = (jsonString: string): {
+    platform: PlatformId;
+    store?: string;
+    total: number;
+    payments: Array<{ amount: number; date: string }>;
+  } => {
+    let data: unknown;
+    try {
+      data = JSON.parse(jsonString);
+    } catch {
+      throw new Error('Invalid JSON format');
+    }
+
+    if (typeof data !== 'object' || data === null) {
+      throw new Error('Invalid JSON format');
+    }
+
+    const obj = data as Record<string, unknown>;
+
+    // Validate platform
+    if (!obj.platform) {
+      throw new Error('Missing required field: platform');
+    }
+    if (!VALID_PLATFORM_IDS.includes(obj.platform as typeof VALID_PLATFORM_IDS[number])) {
+      throw new Error('Invalid platform. Must be one of: afterpay, sezzle, klarna, zip, four, affirm');
+    }
+
+    // Validate total
+    if (obj.total === undefined || obj.total === null) {
+      throw new Error('Missing required field: total');
+    }
+    if (typeof obj.total !== 'number' || obj.total <= 0) {
+      throw new Error('Total must be a positive number');
+    }
+
+    // Validate payments
+    if (!obj.payments) {
+      throw new Error('Missing required field: payments');
+    }
+    if (!Array.isArray(obj.payments) || obj.payments.length === 0) {
+      throw new Error('Payments array must have at least one payment');
+    }
+
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    const payments = obj.payments.map((payment: unknown, index: number) => {
+      const paymentNum = index + 1;
+      if (typeof payment !== 'object' || payment === null) {
+        throw new Error(`Payment #${paymentNum} is invalid`);
+      }
+      const p = payment as Record<string, unknown>;
+
+      if (p.amount === undefined || p.amount === null) {
+        throw new Error(`Payment #${paymentNum} is missing required field: amount`);
+      }
+      if (typeof p.amount !== 'number' || p.amount <= 0) {
+        throw new Error(`Payment #${paymentNum} amount must be a positive number`);
+      }
+
+      if (!p.date) {
+        throw new Error(`Payment #${paymentNum} is missing required field: date`);
+      }
+      if (typeof p.date !== 'string' || !dateRegex.test(p.date)) {
+        throw new Error(`Invalid date format for payment #${paymentNum}. Use YYYY-MM-DD`);
+      }
+
+      return { amount: p.amount, date: p.date };
+    });
+
+    return {
+      platform: obj.platform as PlatformId,
+      store: typeof obj.store === 'string' ? obj.store : undefined,
+      total: obj.total,
+      payments,
+    };
+  };
 
   // Get platform
   const platform = platforms.find((p) => p.id === platformId);
@@ -58,8 +143,7 @@ export function QuickAddModal() {
       return [];
     }
 
-    const installments =
-      platformId === 'affirm' ? customInstallments : platform.defaultInstallments;
+    const installments = customInstallments || platform.defaultInstallments;
     const apr =
       platformId === 'affirm' ? parseFloat(aprInput) / 100 || 0 : undefined;
 
@@ -144,14 +228,12 @@ export function QuickAddModal() {
     });
   }, [calculatedPayments, overrides, amountInCents]);
 
-  // Check for total mismatch - only show warning if ALL payments are overridden
-  const allPaymentsOverridden = calculatedPayments.length > 0 &&
-    calculatedPayments.every((p) => overrides[p.installmentNumber]?.amount !== undefined);
-  const totalOverride = displayPayments.reduce((sum, p) => sum + p.amount, 0);
+  // Check for total mismatch - show warning when payments don't sum to total
+  const paymentsTotal = displayPayments.reduce((sum, p) => sum + p.amount, 0);
   const hasMismatch =
-    allPaymentsOverridden &&
+    displayPayments.length > 0 &&
     amountInCents &&
-    totalOverride !== amountInCents;
+    paymentsTotal !== amountInCents;
 
   // Reset form when modal opens
   useEffect(() => {
@@ -160,11 +242,20 @@ export function QuickAddModal() {
       setStoreName('');
       setAmountInput('');
       setFirstPaymentDate(formatDateInput(new Date()));
-      setCustomInstallments(4);
+      setCustomInstallments(0);
       setAprInput('0');
       setOverrides({});
+      setShowJsonInput(false);
+      setJsonInput('');
+      setJsonError(null);
     }
   }, [isOpen]);
+
+  // Clear overrides when platform changes
+  useEffect(() => {
+    setOverrides({});
+    setCustomInstallments(0);
+  }, [platformId]);
 
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const formatted = formatNumberInput(e.target.value);
@@ -190,6 +281,36 @@ export function QuickAddModal() {
     }));
   };
 
+  const handleApplyJson = () => {
+    try {
+      const parsed = parseOrderJson(jsonInput);
+
+      // Set form fields
+      setPlatformId(parsed.platform);
+      setStoreName(parsed.store || '');
+      setAmountInput(parsed.total.toFixed(2));
+      setFirstPaymentDate(parsed.payments[0].date);
+      setCustomInstallments(parsed.payments.length);
+
+      // Build overrides from payments
+      const newOverrides: Record<number, { amount?: number; dueDate?: string }> = {};
+      parsed.payments.forEach((payment, index) => {
+        newOverrides[index + 1] = {
+          amount: Math.round(payment.amount * 100), // Convert to cents
+          dueDate: payment.date,
+        };
+      });
+      setOverrides(newOverrides);
+
+      // Clear JSON state and return to form view
+      setJsonInput('');
+      setJsonError(null);
+      setShowJsonInput(false);
+    } catch (error) {
+      setJsonError(error instanceof Error ? error.message : 'Invalid JSON');
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -205,7 +326,7 @@ export function QuickAddModal() {
         storeName: storeName.trim() || undefined,
         totalAmount: amountInCents,
         firstPaymentDate,
-        customInstallments: platformId === 'affirm' ? customInstallments : undefined,
+        customInstallments: customInstallments || undefined,
         apr:
           platformId === 'affirm' && parseFloat(aprInput) > 0
             ? parseFloat(aprInput) / 100
@@ -293,7 +414,7 @@ export function QuickAddModal() {
                 Installments
               </label>
               <select
-                value={customInstallments}
+                value={customInstallments || platform?.defaultInstallments || 4}
                 onChange={(e) => setCustomInstallments(Number(e.target.value))}
                 className="w-full px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
@@ -311,6 +432,55 @@ export function QuickAddModal() {
               onChange={(e) => setAprInput(e.target.value)}
               helperText="Enter 0 for 0% APR"
             />
+          </div>
+        )}
+
+        {/* Paste JSON Link */}
+        {!showJsonInput && (
+          <button
+            type="button"
+            onClick={() => setShowJsonInput(true)}
+            className="text-sm text-blue-400 hover:text-blue-300 underline"
+          >
+            Paste JSON
+          </button>
+        )}
+
+        {/* JSON Input Section */}
+        {showJsonInput && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="block text-sm font-medium text-gray-300">
+                Paste Order JSON
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowJsonInput(false);
+                  setJsonInput('');
+                  setJsonError(null);
+                }}
+                className="text-sm text-gray-400 hover:text-gray-300"
+              >
+                Cancel
+              </button>
+            </div>
+            <textarea
+              value={jsonInput}
+              onChange={(e) => setJsonInput(e.target.value)}
+              placeholder='{"platform": "klarna", "total": 85.00, "payments": [...]}'
+              className="w-full h-32 px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-white text-sm font-mono resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            {jsonError && (
+              <p className="text-sm text-red-400">{jsonError}</p>
+            )}
+            <Button
+              type="button"
+              onClick={handleApplyJson}
+              disabled={!jsonInput.trim()}
+            >
+              Apply JSON
+            </Button>
           </div>
         )}
 
@@ -374,7 +544,7 @@ export function QuickAddModal() {
                     d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
                   />
                 </svg>
-                Payments total {formatCurrency(totalOverride)} but order is{' '}
+                Payments sum to {formatCurrency(paymentsTotal)} but total is{' '}
                 {formatCurrency(amountInCents || 0)}
               </p>
             )}
