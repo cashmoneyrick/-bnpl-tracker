@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { Modal } from '../shared/Modal';
 import { Input } from '../shared/Input';
 import { Button } from '../shared/Button';
@@ -19,6 +19,7 @@ export function QuickAddModal() {
   const closeModal = useBNPLStore((state) => state.closeQuickAddModal);
   const addOrder = useBNPLStore((state) => state.addOrder);
   const platforms = useBNPLStore((state) => state.platforms);
+  const markPaymentPaid = useBNPLStore((state) => state.markPaymentPaid);
 
   // Form state
   const [platformId, setPlatformId] = useState<PlatformId>('afterpay');
@@ -43,15 +44,124 @@ export function QuickAddModal() {
   const [jsonInput, setJsonInput] = useState('');
   const [jsonError, setJsonError] = useState<string | null>(null);
 
+  // Ref to track when JSON is being applied (prevents useEffect from clearing overrides)
+  const isApplyingJsonRef = useRef(false);
+
+  // Track payments to mark as paid after order creation (from JSON import)
+  const [pendingPaidPayments, setPendingPaidPayments] = useState<
+    Array<{ installment: number; paidDate?: string }>
+  >([]);
+
   // Valid platform IDs for JSON validation
   const VALID_PLATFORM_IDS = ['afterpay', 'sezzle', 'klarna', 'zip', 'four', 'affirm'] as const;
 
-  // Parse and validate order JSON
+  // Field aliases for flexible JSON parsing
+  const PLATFORM_ALIASES = ['platform', 'provider', 'app', 'bnpl', 'service'];
+  const STORE_ALIASES = ['store', 'merchant', 'retailer', 'vendor', 'shop', 'seller'];
+  const TOTAL_ALIASES = ['total', 'totalamount', 'total_amount', 'amount', 'ordertotal', 'order_total', 'price'];
+  const PAYMENT_AMOUNT_ALIASES = ['amount', 'payment', 'due', 'price'];
+  const PAYMENT_DATE_ALIASES = ['date', 'duedate', 'due_date'];
+  const PAYMENT_STATUS_ALIASES = ['status', 'state'];
+  const PAYMENT_PAIDDATE_ALIASES = ['paiddate', 'paid_date', 'paidDate'];
+
+  // Find field value using multiple possible key names (case-insensitive)
+  const findField = (obj: Record<string, unknown>, aliases: string[]): unknown => {
+    const lowerKeys = Object.keys(obj).reduce((acc, key) => {
+      acc[key.toLowerCase()] = key;
+      return acc;
+    }, {} as Record<string, string>);
+
+    for (const alias of aliases) {
+      const originalKey = lowerKeys[alias.toLowerCase()];
+      if (originalKey && obj[originalKey] !== undefined) {
+        return obj[originalKey];
+      }
+    }
+    return undefined;
+  };
+
+  // Normalize amount: "$1,234.56" → 1234.56
+  const normalizeAmount = (value: unknown): number | null => {
+    if (typeof value === 'number') return value;
+    if (typeof value !== 'string') return null;
+    const cleaned = value.replace(/[$,]/g, '').trim();
+    const num = parseFloat(cleaned);
+    return isNaN(num) ? null : num;
+  };
+
+  // Normalize date to YYYY-MM-DD
+  const normalizeDate = (value: unknown): string | null => {
+    if (typeof value !== 'string') return null;
+    const str = value.trim();
+
+    // Already YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+
+    // MM/DD/YYYY
+    const slashMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (slashMatch) {
+      const [, m, d, y] = slashMatch;
+      return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+    }
+
+    // Try parsing with Date (handles "Jan 23, 2026", "23 Jan 2026", etc.)
+    const parsed = new Date(str);
+    if (!isNaN(parsed.getTime())) {
+      const y = parsed.getFullYear();
+      const m = String(parsed.getMonth() + 1).padStart(2, '0');
+      const d = String(parsed.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+
+    return null;
+  };
+
+  // Normalize platform name: "After Pay" → "afterpay"
+  const normalizePlatform = (value: unknown): string | null => {
+    if (typeof value !== 'string') return null;
+    return value.toLowerCase().replace(/\s+/g, '');
+  };
+
+  // Normalize status: various values → 'paid' | 'pending'
+  const normalizeStatus = (value: unknown): 'paid' | 'pending' => {
+    if (typeof value !== 'string') return 'pending';
+    const str = value.toLowerCase().trim();
+
+    // Values that mean "paid"
+    if (['paid', 'complete', 'completed'].includes(str)) {
+      return 'paid';
+    }
+
+    // Everything else (including 'pending', 'upcoming', 'scheduled', 'due', or unrecognized) → pending
+    return 'pending';
+  };
+
+  // Find payments array (may be nested)
+  const findPaymentsArray = (obj: Record<string, unknown>): unknown[] | null => {
+    const paymentAliases = ['payments', 'paymentplan', 'payment_plan', 'schedule', 'installments', 'instalments'];
+
+    // Check root level
+    const rootPayments = findField(obj, paymentAliases);
+    if (Array.isArray(rootPayments)) return rootPayments;
+
+    // Check one level deep (data.payments, order.payments, etc.)
+    for (const key of Object.keys(obj)) {
+      const nested = obj[key];
+      if (typeof nested === 'object' && nested !== null && !Array.isArray(nested)) {
+        const nestedPayments = findField(nested as Record<string, unknown>, paymentAliases);
+        if (Array.isArray(nestedPayments)) return nestedPayments;
+      }
+    }
+
+    return null;
+  };
+
+  // Parse and validate order JSON (flexible with field names and formats)
   const parseOrderJson = (jsonString: string): {
     platform: PlatformId;
     store?: string;
     total: number;
-    payments: Array<{ amount: number; date: string }>;
+    payments: Array<{ amount: number; date: string; status: 'paid' | 'pending'; paidDate?: string }>;
   } => {
     let data: unknown;
     try {
@@ -66,59 +176,85 @@ export function QuickAddModal() {
 
     const obj = data as Record<string, unknown>;
 
-    // Validate platform
-    if (!obj.platform) {
+    // Find and validate platform
+    const rawPlatform = findField(obj, PLATFORM_ALIASES);
+    if (!rawPlatform) {
       throw new Error('Missing required field: platform');
     }
-    if (!VALID_PLATFORM_IDS.includes(obj.platform as typeof VALID_PLATFORM_IDS[number])) {
+    const normalizedPlatform = normalizePlatform(rawPlatform);
+    if (!normalizedPlatform || !VALID_PLATFORM_IDS.includes(normalizedPlatform as typeof VALID_PLATFORM_IDS[number])) {
       throw new Error('Invalid platform. Must be one of: afterpay, sezzle, klarna, zip, four, affirm');
     }
 
-    // Validate total
-    if (obj.total === undefined || obj.total === null) {
+    // Find and validate total
+    const rawTotal = findField(obj, TOTAL_ALIASES);
+    if (rawTotal === undefined) {
       throw new Error('Missing required field: total');
     }
-    if (typeof obj.total !== 'number' || obj.total <= 0) {
+    const total = normalizeAmount(rawTotal);
+    if (total === null || total <= 0) {
       throw new Error('Total must be a positive number');
     }
 
-    // Validate payments
-    if (!obj.payments) {
+    // Find store (optional)
+    const rawStore = findField(obj, STORE_ALIASES);
+    const store = typeof rawStore === 'string' ? rawStore : undefined;
+
+    // Find and validate payments array
+    const paymentsArray = findPaymentsArray(obj);
+    if (!paymentsArray || paymentsArray.length === 0) {
       throw new Error('Missing required field: payments');
     }
-    if (!Array.isArray(obj.payments) || obj.payments.length === 0) {
-      throw new Error('Payments array must have at least one payment');
-    }
 
-    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-    const payments = obj.payments.map((payment: unknown, index: number) => {
+    // Parse each payment
+    const payments = paymentsArray.map((payment: unknown, index: number) => {
       const paymentNum = index + 1;
       if (typeof payment !== 'object' || payment === null) {
         throw new Error(`Payment #${paymentNum} is invalid`);
       }
       const p = payment as Record<string, unknown>;
 
-      if (p.amount === undefined || p.amount === null) {
+      // Amount
+      const rawAmount = findField(p, PAYMENT_AMOUNT_ALIASES);
+      if (rawAmount === undefined) {
         throw new Error(`Payment #${paymentNum} is missing required field: amount`);
       }
-      if (typeof p.amount !== 'number' || p.amount <= 0) {
+      const amount = normalizeAmount(rawAmount);
+      if (amount === null || amount <= 0) {
         throw new Error(`Payment #${paymentNum} amount must be a positive number`);
       }
 
-      if (!p.date) {
+      // Date
+      const rawDate = findField(p, PAYMENT_DATE_ALIASES);
+      if (!rawDate) {
         throw new Error(`Payment #${paymentNum} is missing required field: date`);
       }
-      if (typeof p.date !== 'string' || !dateRegex.test(p.date)) {
-        throw new Error(`Invalid date format for payment #${paymentNum}. Use YYYY-MM-DD`);
+      const date = normalizeDate(rawDate);
+      if (!date) {
+        throw new Error(`Invalid date format for payment #${paymentNum}`);
       }
 
-      return { amount: p.amount, date: p.date };
+      // Status (optional) - normalize various values to 'paid' or 'pending'
+      const rawStatus = findField(p, PAYMENT_STATUS_ALIASES);
+      const status = normalizeStatus(rawStatus);
+
+      // PaidDate (optional)
+      let paidDate: string | undefined;
+      const rawPaidDate = findField(p, PAYMENT_PAIDDATE_ALIASES);
+      if (rawPaidDate !== undefined) {
+        paidDate = normalizeDate(rawPaidDate) ?? undefined;
+        if (rawPaidDate && !paidDate) {
+          throw new Error(`Invalid paidDate format for payment #${paymentNum}`);
+        }
+      }
+
+      return { amount, date, status, paidDate };
     });
 
     return {
-      platform: obj.platform as PlatformId,
-      store: typeof obj.store === 'string' ? obj.store : undefined,
-      total: obj.total,
+      platform: normalizedPlatform as PlatformId,
+      store,
+      total,
       payments,
     };
   };
@@ -248,11 +384,16 @@ export function QuickAddModal() {
       setShowJsonInput(false);
       setJsonInput('');
       setJsonError(null);
+      setPendingPaidPayments([]);
     }
   }, [isOpen]);
 
-  // Clear overrides when platform changes
+  // Clear overrides when platform changes (but not when applying JSON)
   useEffect(() => {
+    if (isApplyingJsonRef.current) {
+      isApplyingJsonRef.current = false;
+      return;
+    }
     setOverrides({});
     setCustomInstallments(0);
   }, [platformId]);
@@ -285,6 +426,9 @@ export function QuickAddModal() {
     try {
       const parsed = parseOrderJson(jsonInput);
 
+      // Mark that we're applying JSON to prevent useEffect from clearing overrides
+      isApplyingJsonRef.current = true;
+
       // Set form fields
       setPlatformId(parsed.platform);
       setStoreName(parsed.store || '');
@@ -301,6 +445,13 @@ export function QuickAddModal() {
         };
       });
       setOverrides(newOverrides);
+
+      // Track payments that should be marked as paid after order creation
+      const paidPayments = parsed.payments
+        .map((p, i) => ({ installment: i + 1, status: p.status, paidDate: p.paidDate }))
+        .filter(p => p.status === 'paid')
+        .map(p => ({ installment: p.installment, paidDate: p.paidDate }));
+      setPendingPaidPayments(paidPayments);
 
       // Clear JSON state and return to form view
       setJsonInput('');
@@ -321,7 +472,7 @@ export function QuickAddModal() {
     setIsSubmitting(true);
 
     try {
-      await addOrder({
+      const { order, payments: createdPayments } = await addOrder({
         platformId,
         storeName: storeName.trim() || undefined,
         totalAmount: amountInCents,
@@ -334,6 +485,19 @@ export function QuickAddModal() {
         paymentOverrides:
           Object.keys(overrides).length > 0 ? overrides : undefined,
       });
+
+      // Mark payments as paid based on JSON import statuses
+      if (pendingPaidPayments.length > 0) {
+        for (const pending of pendingPaidPayments) {
+          const payment = createdPayments.find(
+            p => p.installmentNumber === pending.installment
+          );
+          if (payment) {
+            await markPaymentPaid(payment.id, pending.paidDate);
+          }
+        }
+        setPendingPaidPayments([]);
+      }
 
       closeModal();
     } catch (error) {

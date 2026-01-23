@@ -27,10 +27,10 @@ interface BNPLStore {
 
   // Actions
   initialize: () => Promise<void>;
-  addOrder: (input: NewOrderInput) => Promise<Order>;
+  addOrder: (input: NewOrderInput) => Promise<{ order: Order; payments: Payment[] }>;
   updateOrder: (id: string, updates: Partial<Order>) => Promise<void>;
   deleteOrder: (id: string) => Promise<void>;
-  markPaymentPaid: (paymentId: string) => Promise<void>;
+  markPaymentPaid: (paymentId: string, customPaidDate?: string) => Promise<void>;
   markPaymentUnpaid: (paymentId: string) => Promise<void>;
   updatePayment: (id: string, updates: Partial<Payment>) => Promise<void>;
   updatePlatformLimit: (platformId: PlatformId, limit: number) => Promise<void>;
@@ -164,7 +164,7 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
     // Check for overdue
     await get().updateOverduePayments();
 
-    return order;
+    return { order, payments: paymentRecords };
   },
 
   // Update an existing order
@@ -195,7 +195,7 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
   },
 
   // Mark a payment as paid
-  markPaymentPaid: async (paymentId: string) => {
+  markPaymentPaid: async (paymentId: string, customPaidDate?: string) => {
     const { payments, orders } = get();
     const payment = payments.find((p) => p.id === paymentId);
 
@@ -203,14 +203,14 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
       throw new Error(`Payment not found: ${paymentId}`);
     }
 
-    const now = new Date();
+    const paidDateValue = customPaidDate ? parseISO(customPaidDate) : new Date();
     const dueDate = parseISO(payment.dueDate);
-    const paidOnTime = !isBefore(startOfDay(dueDate), startOfDay(now));
+    const paidOnTime = !isBefore(startOfDay(dueDate), startOfDay(paidDateValue));
 
     const updatedPayment: Payment = {
       ...payment,
       status: 'paid',
-      paidDate: now.toISOString(),
+      paidDate: paidDateValue.toISOString(),
       paidOnTime,
     };
 

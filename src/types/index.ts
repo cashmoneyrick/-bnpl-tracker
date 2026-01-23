@@ -1,13 +1,5 @@
-export type PlatformId = 'afterpay' | 'sezzle' | 'klarna' | 'zip' | 'four' | 'affirm';
-
-export interface Platform {
-  id: PlatformId;
-  name: string;
-  creditLimit: number; // in cents
-  color: string;
-  defaultInstallments: number;
-  defaultIntervalDays: number;
-}
+// Re-export platform types from constants (single source of truth)
+export type { PlatformId, Platform } from '../constants/platforms';
 
 export interface Order {
   id: string;

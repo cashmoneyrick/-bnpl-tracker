@@ -1,15 +1,28 @@
 import { Card } from '../shared/Card';
+import { useBNPLStore } from '../../store';
 import {
   useTotalOwed,
-  useTotalAvailableCredit,
+  useAllPlatformUtilizations,
   useMonthlyOutgoing,
 } from '../../store/selectors';
 import { formatCurrency } from '../../utils/currency';
 
 export function SummaryCards() {
   const totalOwed = useTotalOwed();
-  const availableCredit = useTotalAvailableCredit();
   const monthlyOutgoing = useMonthlyOutgoing();
+  const platforms = useBNPLStore((state) => state.platforms);
+  const utilizations = useAllPlatformUtilizations();
+
+  // Filter platforms with credit limit > 0, sort by available (descending)
+  const platformCredits = utilizations
+    .filter((u) => u.limit > 0)
+    .map((u) => ({
+      ...u,
+      platform: platforms.find((p) => p.id === u.platformId)!,
+    }))
+    .sort((a, b) => b.available - a.available);
+
+  const totalAvailable = platformCredits.reduce((sum, p) => sum + p.available, 0);
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -40,31 +53,35 @@ export function SummaryCards() {
         </div>
       </Card>
 
-      {/* Available Credit */}
+      {/* Available Credit - Per Platform */}
       <Card>
-        <div className="flex items-start justify-between">
-          <div>
-            <p className="text-sm text-gray-400">Available Credit</p>
-            <p className="text-2xl font-bold text-white mt-1">
-              {formatCurrency(availableCredit)}
-            </p>
-          </div>
-          <div className="p-2 bg-green-500/10 rounded-lg">
-            <svg
-              className="w-6 h-6 text-green-400"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-              />
-            </svg>
-          </div>
+        <p className="text-sm text-gray-400 mb-3">Available Credit</p>
+        <div className="space-y-2">
+          {platformCredits.map(({ platform, available }) => (
+            <div key={platform.id} className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span
+                  className="w-2.5 h-2.5 rounded-full"
+                  style={{ backgroundColor: platform.color }}
+                />
+                <span className="text-sm text-gray-300">{platform.name}</span>
+              </div>
+              <span className="text-sm font-medium text-white">
+                {formatCurrency(available)}
+              </span>
+            </div>
+          ))}
         </div>
+        {platformCredits.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-dark-border">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-500">Total</span>
+              <span className="text-xs text-gray-500">
+                {formatCurrency(totalAvailable)}
+              </span>
+            </div>
+          </div>
+        )}
       </Card>
 
       {/* This Month's Outgoing */}

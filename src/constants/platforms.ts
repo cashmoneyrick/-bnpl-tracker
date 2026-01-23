@@ -1,6 +1,15 @@
-import type { Platform, Subscription } from '../types';
+// =============================================================================
+// PLATFORM CONFIGURATION - Single Source of Truth
+// =============================================================================
+// To add a new BNPL platform:
+// 1. Add it to DEFAULT_PLATFORMS below
+// 2. The PlatformId type and PLATFORM_COLORS will update automatically
+// =============================================================================
 
-export const DEFAULT_PLATFORMS: Platform[] = [
+import type { Subscription } from '../types';
+
+// Platform configuration - source of truth for all platform data
+export const DEFAULT_PLATFORMS = [
   {
     id: 'afterpay',
     name: 'Afterpay',
@@ -49,20 +58,38 @@ export const DEFAULT_PLATFORMS: Platform[] = [
     defaultInstallments: 4,
     defaultIntervalDays: 14,
   },
-];
+] as const;
+
+// Derive PlatformId type from DEFAULT_PLATFORMS
+export type PlatformId = (typeof DEFAULT_PLATFORMS)[number]['id'];
+
+// Platform interface (mutable version for runtime use)
+export interface Platform {
+  id: PlatformId;
+  name: string;
+  creditLimit: number; // in cents
+  color: string;
+  defaultInstallments: number;
+  defaultIntervalDays: number;
+}
+
+// Generate PLATFORM_COLORS from DEFAULT_PLATFORMS
+export const PLATFORM_COLORS: Record<PlatformId, string> = Object.fromEntries(
+  DEFAULT_PLATFORMS.map((p) => [p.id, p.color])
+) as Record<PlatformId, string>;
 
 export const DEFAULT_SUBSCRIPTIONS: Subscription[] = [
   {
     platformId: 'sezzle',
     isActive: true,
-    monthlyCost: 0, // To be filled by user
+    monthlyCost: 0,
     benefits: [],
     startDate: undefined,
   },
   {
     platformId: 'four',
     isActive: true,
-    monthlyCost: 0, // To be filled by user
+    monthlyCost: 0,
     benefits: [],
     startDate: undefined,
   },
@@ -70,13 +97,3 @@ export const DEFAULT_SUBSCRIPTIONS: Subscription[] = [
 
 // Affirm installment options
 export const AFFIRM_INSTALLMENT_OPTIONS = [3, 4, 6, 12, 18, 24, 36, 48];
-
-// Platform color mapping for dynamic use
-export const PLATFORM_COLORS: Record<string, string> = {
-  afterpay: '#B2FCE4',
-  sezzle: '#8832D4',
-  klarna: '#FFB3C7',
-  zip: '#00A9E0',
-  four: '#FF6B35',
-  affirm: '#0FA0EA',
-};

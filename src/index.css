@@ -43,26 +43,5 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   cursor: pointer;
 }
 
-/* Platform color utilities */
-@layer utilities {
-  .text-platform-afterpay { color: #B2FCE4; }
-  .text-platform-sezzle { color: #8832D4; }
-  .text-platform-klarna { color: #FFB3C7; }
-  .text-platform-zip { color: #00A9E0; }
-  .text-platform-four { color: #FF6B35; }
-  .text-platform-affirm { color: #0FA0EA; }
-
-  .bg-platform-afterpay { background-color: #B2FCE4; }
-  .bg-platform-sezzle { background-color: #8832D4; }
-  .bg-platform-klarna { background-color: #FFB3C7; }
-  .bg-platform-zip { background-color: #00A9E0; }
-  .bg-platform-four { background-color: #FF6B35; }
-  .bg-platform-affirm { background-color: #0FA0EA; }
-
-  .border-platform-afterpay { border-color: #B2FCE4; }
-  .border-platform-sezzle { border-color: #8832D4; }
-  .border-platform-klarna { border-color: #FFB3C7; }
-  .border-platform-zip { border-color: #00A9E0; }
-  .border-platform-four { border-color: #FF6B35; }
-  .border-platform-affirm { border-color: #0FA0EA; }
-}
+/* Platform colors are defined in src/constants/platforms.ts
+   Use inline styles with platform.color for dynamic coloring */
