@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { Modal } from '../shared/Modal';
 import { Input } from '../shared/Input';
 import { Button } from '../shared/Button';
+import { useToast } from '../shared/Toast';
 import { useBNPLStore } from '../../store';
 import { calculatePayments } from '../../services/paymentCalculator';
 import {
@@ -15,6 +16,7 @@ import type { PlatformId } from '../../types';
 import { AFFIRM_INSTALLMENT_OPTIONS } from '../../constants/platforms';
 
 export function QuickAddModal() {
+  const { showToast } = useToast();
   const isOpen = useBNPLStore((state) => state.quickAddModalOpen);
   const closeModal = useBNPLStore((state) => state.closeQuickAddModal);
   const addOrder = useBNPLStore((state) => state.addOrder);
@@ -472,7 +474,7 @@ export function QuickAddModal() {
     setIsSubmitting(true);
 
     try {
-      const { order, payments: createdPayments } = await addOrder({
+      const { payments: createdPayments } = await addOrder({
         platformId,
         storeName: storeName.trim() || undefined,
         totalAmount: amountInCents,
@@ -499,9 +501,12 @@ export function QuickAddModal() {
         setPendingPaidPayments([]);
       }
 
+      const platform = platforms.find(p => p.id === platformId);
+      showToast(`Order added to ${platform?.name || 'platform'}`, 'success');
       closeModal();
     } catch (error) {
       console.error('Failed to add order:', error);
+      showToast('Failed to add order', 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -557,6 +562,7 @@ export function QuickAddModal() {
           placeholder="0.00"
           value={amountInput}
           onChange={handleAmountChange}
+          autoFocus
           error={
             amountInput && !amountInCents ? 'Enter a valid amount' : undefined
           }

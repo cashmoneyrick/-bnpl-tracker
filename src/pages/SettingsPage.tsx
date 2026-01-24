@@ -1,9 +1,15 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Card } from '../components/shared/Card';
 import { Button } from '../components/shared/Button';
 import { Modal } from '../components/shared/Modal';
+import { useToast } from '../components/shared/Toast';
 import { useBNPLStore } from '../store';
 import { formatCurrency, parseDollarInput, centsToDollars } from '../utils/currency';
+import {
+  isNotificationSupported,
+  getPermissionStatus,
+  requestPermission,
+} from '../services/notifications';
 import type { PlatformId, ExportedData } from '../types';
 
 function PlatformSettings({ platformId }: { platformId: PlatformId }) {
@@ -12,25 +18,42 @@ function PlatformSettings({ platformId }: { platformId: PlatformId }) {
   const updatePlatformSchedule = useBNPLStore((state) => state.updatePlatformSchedule);
 
   const platform = platforms.find((p) => p.id === platformId);
-  if (!platform) return null;
 
   const [isEditingLimit, setIsEditingLimit] = useState(false);
   const [limitInput, setLimitInput] = useState(
-    centsToDollars(platform.creditLimit).toString()
+    platform ? centsToDollars(platform.creditLimit).toString() : '0'
   );
-  const [installments, setInstallments] = useState(platform.defaultInstallments);
-  const [intervalDays, setIntervalDays] = useState(platform.defaultIntervalDays);
+  const [installments, setInstallments] = useState(platform?.defaultInstallments ?? 4);
+  const [intervalDays, setIntervalDays] = useState(platform?.defaultIntervalDays ?? 14);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+
+  // Sync local state when platform data changes (e.g., after store updates)
+  useEffect(() => {
+    if (platform) {
+      setLimitInput(centsToDollars(platform.creditLimit).toString());
+      setInstallments(platform.defaultInstallments);
+      setIntervalDays(platform.defaultIntervalDays);
+    }
+  }, [platform?.creditLimit, platform?.defaultInstallments, platform?.defaultIntervalDays]);
+
+  if (!platform) return null;
 
   const handleSaveLimit = async () => {
     const newLimit = parseDollarInput(limitInput);
     if (newLimit !== null) {
+      setSaveStatus('saving');
       await updatePlatformLimit(platformId, newLimit);
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 2000);
       setIsEditingLimit(false);
     }
   };
 
   const handleSaveSchedule = async () => {
+    setSaveStatus('saving');
     await updatePlatformSchedule(platformId, installments, intervalDays);
+    setSaveStatus('saved');
+    setTimeout(() => setSaveStatus('idle'), 2000);
   };
 
   return (
@@ -115,6 +138,13 @@ function PlatformSettings({ platformId }: { platformId: PlatformId }) {
             ))}
           </select>
         </div>
+
+        {/* Save Status Indicator */}
+        {saveStatus !== 'idle' && (
+          <span className={`text-xs ${saveStatus === 'saving' ? 'text-gray-400' : 'text-green-400'}`}>
+            {saveStatus === 'saving' ? 'Saving...' : '✓ Saved'}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -128,18 +158,29 @@ function SubscriptionSettings({ platformId }: { platformId: PlatformId }) {
   const platform = platforms.find((p) => p.id === platformId);
   const subscription = subscriptions.find((s) => s.platformId === platformId);
 
-  if (!platform) return null;
-
   const [isActive, setIsActive] = useState(subscription?.isActive ?? false);
   const [costInput, setCostInput] = useState(
     subscription ? centsToDollars(subscription.monthlyCost).toString() : '0'
   );
   const [benefits, setBenefits] = useState<string[]>(subscription?.benefits ?? []);
   const [newBenefit, setNewBenefit] = useState('');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+
+  // Sync local state when subscription data changes
+  useEffect(() => {
+    if (subscription) {
+      setIsActive(subscription.isActive);
+      setCostInput(centsToDollars(subscription.monthlyCost).toString());
+      setBenefits(subscription.benefits);
+    }
+  }, [subscription?.isActive, subscription?.monthlyCost, subscription?.benefits]);
+
+  if (!platform) return null;
 
   const handleToggleActive = async () => {
     const newActive = !isActive;
     setIsActive(newActive);
+    setSaveStatus('saving');
 
     await updateSubscription({
       platformId,
@@ -147,17 +188,22 @@ function SubscriptionSettings({ platformId }: { platformId: PlatformId }) {
       monthlyCost: parseDollarInput(costInput) ?? 0,
       benefits,
     });
+    setSaveStatus('saved');
+    setTimeout(() => setSaveStatus('idle'), 2000);
   };
 
   const handleSaveCost = async () => {
     const cost = parseDollarInput(costInput);
     if (cost !== null) {
+      setSaveStatus('saving');
       await updateSubscription({
         platformId,
         isActive,
         monthlyCost: cost,
         benefits,
       });
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 2000);
     }
   };
 
@@ -166,6 +212,7 @@ function SubscriptionSettings({ platformId }: { platformId: PlatformId }) {
       const newBenefits = [...benefits, newBenefit.trim()];
       setBenefits(newBenefits);
       setNewBenefit('');
+      setSaveStatus('saving');
 
       await updateSubscription({
         platformId,
@@ -173,12 +220,15 @@ function SubscriptionSettings({ platformId }: { platformId: PlatformId }) {
         monthlyCost: parseDollarInput(costInput) ?? 0,
         benefits: newBenefits,
       });
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 2000);
     }
   };
 
   const handleRemoveBenefit = async (index: number) => {
     const newBenefits = benefits.filter((_, i) => i !== index);
     setBenefits(newBenefits);
+    setSaveStatus('saving');
 
     await updateSubscription({
       platformId,
@@ -186,6 +236,8 @@ function SubscriptionSettings({ platformId }: { platformId: PlatformId }) {
       monthlyCost: parseDollarInput(costInput) ?? 0,
       benefits: newBenefits,
     });
+    setSaveStatus('saved');
+    setTimeout(() => setSaveStatus('idle'), 2000);
   };
 
   return (
@@ -197,6 +249,12 @@ function SubscriptionSettings({ platformId }: { platformId: PlatformId }) {
             style={{ backgroundColor: platform.color }}
           />
           <span className="font-medium text-white">{platform.name}</span>
+          {/* Save Status Indicator */}
+          {saveStatus !== 'idle' && (
+            <span className={`text-xs ${saveStatus === 'saving' ? 'text-gray-400' : 'text-green-400'}`}>
+              {saveStatus === 'saving' ? 'Saving...' : '✓ Saved'}
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-4">
@@ -285,13 +343,188 @@ function SubscriptionSettings({ platformId }: { platformId: PlatformId }) {
   );
 }
 
+function NotificationSettingsCard() {
+  const { showToast } = useToast();
+  const notificationSettings = useBNPLStore((state) => state.notificationSettings);
+  const updateNotificationSettings = useBNPLStore((state) => state.updateNotificationSettings);
+
+  const [permissionStatus, setPermissionStatus] = useState<NotificationPermission | 'unsupported'>(
+    getPermissionStatus()
+  );
+
+  const isSupported = isNotificationSupported();
+  const isGranted = permissionStatus === 'granted';
+  const isDenied = permissionStatus === 'denied';
+
+  const handleToggleEnabled = async () => {
+    if (!notificationSettings.enabled) {
+      // Enabling - request permission first
+      const granted = await requestPermission();
+      setPermissionStatus(getPermissionStatus());
+
+      if (granted) {
+        updateNotificationSettings({ ...notificationSettings, enabled: true });
+        showToast('Notifications enabled', 'success');
+      } else {
+        showToast('Notification permission denied', 'error');
+      }
+    } else {
+      // Disabling
+      updateNotificationSettings({ ...notificationSettings, enabled: false });
+      showToast('Notifications disabled', 'info');
+    }
+  };
+
+  const handleDaysBeforeChange = (days: number) => {
+    updateNotificationSettings({ ...notificationSettings, daysBefore: days });
+  };
+
+  const handleToggleOnDueDate = () => {
+    updateNotificationSettings({
+      ...notificationSettings,
+      notifyOnDueDate: !notificationSettings.notifyOnDueDate,
+    });
+  };
+
+  const handleToggleOverdue = () => {
+    updateNotificationSettings({
+      ...notificationSettings,
+      notifyOverdue: !notificationSettings.notifyOverdue,
+    });
+  };
+
+  if (!isSupported) {
+    return (
+      <Card>
+        <h2 className="text-lg font-semibold text-white mb-4">Notifications</h2>
+        <p className="text-sm text-gray-400">
+          Browser notifications are not supported in this browser.
+        </p>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <h2 className="text-lg font-semibold text-white mb-4">Notifications</h2>
+      <p className="text-sm text-gray-400 mb-4">
+        Get browser notifications for upcoming and overdue payments.
+      </p>
+
+      <div className="space-y-4">
+        {/* Enable/Disable Toggle */}
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-white">Enable Notifications</p>
+            {isDenied && (
+              <p className="text-sm text-amber-400 mt-1">
+                Permission denied. Please enable in browser settings.
+              </p>
+            )}
+          </div>
+          <button
+            onClick={handleToggleEnabled}
+            disabled={isDenied}
+            className={`
+              relative w-12 h-6 rounded-full transition-colors disabled:opacity-50
+              ${notificationSettings.enabled && isGranted ? 'bg-blue-600' : 'bg-dark-border'}
+            `}
+          >
+            <span
+              className={`
+                absolute top-1 w-4 h-4 rounded-full bg-white transition-transform
+                ${notificationSettings.enabled && isGranted ? 'left-7' : 'left-1'}
+              `}
+            />
+          </button>
+        </div>
+
+        {/* Settings (only show if enabled) */}
+        {notificationSettings.enabled && isGranted && (
+          <>
+            {/* Days Before */}
+            <div className="flex items-center justify-between pt-4 border-t border-dark-border">
+              <div>
+                <p className="text-white">Advance Notice</p>
+                <p className="text-sm text-gray-400">
+                  How many days before to notify
+                </p>
+              </div>
+              <select
+                value={notificationSettings.daysBefore}
+                onChange={(e) => handleDaysBeforeChange(Number(e.target.value))}
+                className="px-3 py-1.5 bg-dark-card border border-dark-border rounded-lg text-white"
+              >
+                <option value={1}>1 day</option>
+                <option value={2}>2 days</option>
+                <option value={3}>3 days</option>
+              </select>
+            </div>
+
+            {/* Notify on due date */}
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-white">Notify on Due Date</p>
+                <p className="text-sm text-gray-400">
+                  Remind me when payment is due today
+                </p>
+              </div>
+              <button
+                onClick={handleToggleOnDueDate}
+                className={`
+                  relative w-12 h-6 rounded-full transition-colors
+                  ${notificationSettings.notifyOnDueDate ? 'bg-blue-600' : 'bg-dark-border'}
+                `}
+              >
+                <span
+                  className={`
+                    absolute top-1 w-4 h-4 rounded-full bg-white transition-transform
+                    ${notificationSettings.notifyOnDueDate ? 'left-7' : 'left-1'}
+                  `}
+                />
+              </button>
+            </div>
+
+            {/* Notify when overdue */}
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-white">Notify When Overdue</p>
+                <p className="text-sm text-gray-400">
+                  Alert me about missed payments
+                </p>
+              </div>
+              <button
+                onClick={handleToggleOverdue}
+                className={`
+                  relative w-12 h-6 rounded-full transition-colors
+                  ${notificationSettings.notifyOverdue ? 'bg-blue-600' : 'bg-dark-border'}
+                `}
+              >
+                <span
+                  className={`
+                    absolute top-1 w-4 h-4 rounded-full bg-white transition-transform
+                    ${notificationSettings.notifyOverdue ? 'left-7' : 'left-1'}
+                  `}
+                />
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 export function SettingsPage() {
+  const { showToast } = useToast();
   const platforms = useBNPLStore((state) => state.platforms);
   const exportData = useBNPLStore((state) => state.exportData);
   const importData = useBNPLStore((state) => state.importData);
   const clearAllData = useBNPLStore((state) => state.clearAllData);
 
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showImportConfirm, setShowImportConfirm] = useState(false);
+  const [pendingImportData, setPendingImportData] = useState<ExportedData | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -306,9 +539,10 @@ export function SettingsPage() {
     a.download = `bnpl-tracker-export-${new Date().toISOString().split('T')[0]}.json`;
     a.click();
     URL.revokeObjectURL(url);
+    showToast('Data exported successfully', 'success');
   };
 
-  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -321,11 +555,13 @@ export function SettingsPage() {
         throw new Error('Invalid file format');
       }
 
-      await importData(data);
+      // Store pending data and show confirmation
+      setPendingImportData(data);
+      setShowImportConfirm(true);
       setImportError(null);
     } catch (error) {
       setImportError(
-        error instanceof Error ? error.message : 'Failed to import data'
+        error instanceof Error ? error.message : 'Failed to read file'
       );
     }
 
@@ -335,9 +571,33 @@ export function SettingsPage() {
     }
   };
 
+  const handleConfirmImport = async () => {
+    if (!pendingImportData) return;
+
+    try {
+      await importData(pendingImportData);
+      showToast(`Imported ${pendingImportData.orders.length} orders`, 'success');
+      setImportError(null);
+    } catch (error) {
+      setImportError(
+        error instanceof Error ? error.message : 'Failed to import data'
+      );
+      showToast('Import failed', 'error');
+    } finally {
+      setPendingImportData(null);
+      setShowImportConfirm(false);
+    }
+  };
+
+  const handleCancelImport = () => {
+    setPendingImportData(null);
+    setShowImportConfirm(false);
+  };
+
   const handleClearAll = async () => {
     await clearAllData();
     setShowClearConfirm(false);
+    showToast('All data cleared', 'info');
   };
 
   return (
@@ -373,6 +633,9 @@ export function SettingsPage() {
         ))}
       </Card>
 
+      {/* Notifications */}
+      <NotificationSettingsCard />
+
       {/* Data Management */}
       <Card>
         <h2 className="text-lg font-semibold text-white mb-4">
@@ -406,7 +669,7 @@ export function SettingsPage() {
                 ref={fileInputRef}
                 type="file"
                 accept=".json"
-                onChange={handleImport}
+                onChange={handleFileSelect}
                 className="hidden"
               />
               <Button
@@ -454,6 +717,40 @@ export function SettingsPage() {
             </Button>
             <Button variant="danger" onClick={handleClearAll}>
               Delete All Data
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Import Confirmation Modal */}
+      <Modal
+        isOpen={showImportConfirm}
+        onClose={handleCancelImport}
+        title="Import Data"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+            <p className="text-amber-400 text-sm font-medium">Warning</p>
+            <p className="text-gray-300 text-sm mt-1">
+              Importing will replace all existing data. This cannot be undone.
+            </p>
+          </div>
+          {pendingImportData && (
+            <div className="text-sm text-gray-400">
+              <p>File contains:</p>
+              <ul className="list-disc list-inside mt-1">
+                <li>{pendingImportData.orders.length} orders</li>
+                <li>{pendingImportData.payments.length} payments</li>
+              </ul>
+            </div>
+          )}
+          <div className="flex justify-end gap-3">
+            <Button variant="secondary" onClick={handleCancelImport}>
+              Cancel
+            </Button>
+            <Button onClick={handleConfirmImport}>
+              Import Data
             </Button>
           </div>
         </div>

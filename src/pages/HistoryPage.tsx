@@ -215,7 +215,7 @@ export function HistoryPage() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [platformFilter, setPlatformFilter] = useState<PlatformId | 'all'>('all');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'completed'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'completed'>('active');
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
 
   // Filter orders

@@ -205,6 +205,8 @@ export function usePlatformStats(
         case 'last-6-months':
           startDate = startOfMonth(subMonths(now, 5));
           break;
+        default:
+          startDate = new Date(0); // Fallback to epoch (no filtering)
       }
 
       filteredOrders = filteredOrders.filter((o) => {
@@ -395,4 +397,86 @@ export function usePlatform(platformId: PlatformId): Platform | undefined {
     () => platforms.find((p) => p.id === platformId),
     [platforms, platformId]
   );
+}
+
+/**
+ * Month-over-month comparison data
+ */
+export interface MonthComparison {
+  thisMonth: {
+    spending: number;
+    orders: number;
+    avgOrder: number;
+  };
+  lastMonth: {
+    spending: number;
+    orders: number;
+    avgOrder: number;
+  };
+  changes: {
+    spending: number | null;  // percentage, null if no data last month
+    orders: number | null;
+    avgOrder: number | null;
+  };
+}
+
+/**
+ * Get month-over-month comparison
+ */
+export function useMonthComparison(): MonthComparison {
+  const orders = useBNPLStore((state) => state.orders);
+
+  return useMemo(() => {
+    const now = new Date();
+    const thisMonthStart = startOfMonth(now);
+    const thisMonthEnd = endOfMonth(now);
+    const lastMonthStart = startOfMonth(subMonths(now, 1));
+    const lastMonthEnd = endOfMonth(subMonths(now, 1));
+
+    // This month orders
+    const thisMonthOrders = orders.filter((o) => {
+      const createdAt = parseISO(o.createdAt);
+      return isWithinInterval(createdAt, { start: thisMonthStart, end: thisMonthEnd });
+    });
+
+    // Last month orders
+    const lastMonthOrders = orders.filter((o) => {
+      const createdAt = parseISO(o.createdAt);
+      return isWithinInterval(createdAt, { start: lastMonthStart, end: lastMonthEnd });
+    });
+
+    // Calculate stats
+    const thisMonthSpending = thisMonthOrders.reduce((sum, o) => sum + o.totalAmount, 0);
+    const lastMonthSpending = lastMonthOrders.reduce((sum, o) => sum + o.totalAmount, 0);
+
+    const thisMonthCount = thisMonthOrders.length;
+    const lastMonthCount = lastMonthOrders.length;
+
+    const thisMonthAvg = thisMonthCount > 0 ? thisMonthSpending / thisMonthCount : 0;
+    const lastMonthAvg = lastMonthCount > 0 ? lastMonthSpending / lastMonthCount : 0;
+
+    // Calculate percentage changes
+    const calcChange = (current: number, previous: number): number | null => {
+      if (previous === 0) return current > 0 ? null : null; // Can't calculate % from 0
+      return ((current - previous) / previous) * 100;
+    };
+
+    return {
+      thisMonth: {
+        spending: thisMonthSpending,
+        orders: thisMonthCount,
+        avgOrder: Math.round(thisMonthAvg),
+      },
+      lastMonth: {
+        spending: lastMonthSpending,
+        orders: lastMonthCount,
+        avgOrder: Math.round(lastMonthAvg),
+      },
+      changes: {
+        spending: calcChange(thisMonthSpending, lastMonthSpending),
+        orders: calcChange(thisMonthCount, lastMonthCount),
+        avgOrder: calcChange(thisMonthAvg, lastMonthAvg),
+      },
+    };
+  }, [orders]);
 }

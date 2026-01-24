@@ -1,15 +1,20 @@
+import { useState } from 'react';
 import { Card } from '../shared/Card';
 import { Button } from '../shared/Button';
+import { useToast } from '../shared/Toast';
 import { useBNPLStore } from '../../store';
 import { useUpcomingPayments, useOrder } from '../../store/selectors';
 import { formatCurrency } from '../../utils/currency';
 import { getRelativeDateDescription } from '../../utils/date';
 
 function PaymentItem({ payment }: { payment: ReturnType<typeof useUpcomingPayments>[0] }) {
+  const { showToast } = useToast();
   const order = useOrder(payment.orderId);
   const markPaymentPaid = useBNPLStore((state) => state.markPaymentPaid);
   const openOrderDetailModal = useBNPLStore((state) => state.openOrderDetailModal);
   const platforms = useBNPLStore((state) => state.platforms);
+
+  const [isMarking, setIsMarking] = useState(false);
 
   const platform = platforms.find((p) => p.id === payment.platformId);
   const relativeDate = getRelativeDateDescription(payment.dueDate);
@@ -18,7 +23,15 @@ function PaymentItem({ payment }: { payment: ReturnType<typeof useUpcomingPaymen
 
   const handleMarkPaid = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    await markPaymentPaid(payment.id);
+    setIsMarking(true);
+    try {
+      await markPaymentPaid(payment.id);
+      showToast(`Payment marked as paid`, 'success');
+    } catch (error) {
+      showToast('Failed to mark payment', 'error');
+    } finally {
+      setIsMarking(false);
+    }
   };
 
   const handleRowClick = () => {
@@ -64,20 +77,27 @@ function PaymentItem({ payment }: { payment: ReturnType<typeof useUpcomingPaymen
           </div>
         </div>
       </div>
-      <Button variant="ghost" size="sm" onClick={handleMarkPaid}>
-        <svg
-          className="w-5 h-5"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M5 13l4 4L19 7"
-          />
-        </svg>
+      <Button variant="ghost" size="sm" onClick={handleMarkPaid} disabled={isMarking}>
+        {isMarking ? (
+          <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+          </svg>
+        ) : (
+          <svg
+            className="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M5 13l4 4L19 7"
+            />
+          </svg>
+        )}
       </Button>
     </div>
   );

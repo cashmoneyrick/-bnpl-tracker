@@ -1,5 +1,8 @@
-// Re-export platform types from constants (single source of truth)
-export type { PlatformId, Platform } from '../constants/platforms';
+// Import platform types from constants (single source of truth)
+import type { PlatformId, Platform, Subscription } from '../constants/platforms';
+
+// Re-export for consumers
+export type { PlatformId, Platform, Subscription };
 
 export interface Order {
   id: string;
@@ -25,14 +28,6 @@ export interface Payment {
   paidDate?: string; // ISO date when marked as paid
   paidOnTime?: boolean; // for analytics
   isManualOverride: boolean;
-}
-
-export interface Subscription {
-  platformId: PlatformId;
-  isActive: boolean;
-  monthlyCost: number; // in cents
-  benefits: string[];
-  startDate?: string; // ISO date
 }
 
 // Input types for creating new entities
@@ -83,6 +78,14 @@ export interface PlatformStats {
 
 // Date range filter options
 export type DateRangeOption = 'this-month' | 'last-3-months' | 'last-6-months' | 'all-time';
+
+// Notification settings
+export interface NotificationSettings {
+  enabled: boolean;
+  daysBefore: number; // 1, 2, or 3 days before due
+  notifyOnDueDate: boolean;
+  notifyOverdue: boolean;
+}
 
 // Export/Import data format
 export interface ExportedData {

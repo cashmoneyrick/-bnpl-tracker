@@ -8,6 +8,7 @@ import type {
   NewOrderInput,
   PlatformId,
   ExportedData,
+  NotificationSettings,
 } from '../types';
 import { storage } from '../services/storage';
 import { calculatePayments } from '../services/paymentCalculator';
@@ -19,6 +20,7 @@ interface BNPLStore {
   payments: Payment[];
   platforms: Platform[];
   subscriptions: Subscription[];
+  notificationSettings: NotificationSettings;
   isLoading: boolean;
   isInitialized: boolean;
 
@@ -43,6 +45,7 @@ interface BNPLStore {
   ) => Promise<void>;
   updateSubscription: (subscription: Subscription) => Promise<void>;
   updateOverduePayments: () => Promise<void>;
+  updateNotificationSettings: (settings: NotificationSettings) => void;
 
   // UI Actions
   openQuickAddModal: () => void;
@@ -62,6 +65,12 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
   payments: [],
   platforms: [],
   subscriptions: [],
+  notificationSettings: {
+    enabled: false,
+    daysBefore: 1,
+    notifyOnDueDate: true,
+    notifyOverdue: true,
+  },
   isLoading: false,
   isInitialized: false,
 
@@ -86,11 +95,14 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
         storage.getAllSubscriptions(),
       ]);
 
+      const notificationSettings = storage.getNotificationSettings();
+
       set({
         orders,
         payments,
         platforms,
         subscriptions,
+        notificationSettings,
         isLoading: false,
         isInitialized: true,
       });
@@ -155,10 +167,29 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
       };
     });
 
-    // Save to storage
-    await storage.saveOrder(order);
-    for (const payment of paymentRecords) {
-      await storage.savePayment(payment);
+    // Save to storage (transactional - rollback on failure)
+    const savedPaymentIds: string[] = [];
+    try {
+      await storage.saveOrder(order);
+      for (const payment of paymentRecords) {
+        await storage.savePayment(payment);
+        savedPaymentIds.push(payment.id);
+      }
+    } catch (error) {
+      // Rollback: delete saved payments and order
+      for (const paymentId of savedPaymentIds) {
+        try {
+          await storage.deletePayment(paymentId);
+        } catch {
+          // Ignore rollback errors
+        }
+      }
+      try {
+        await storage.deleteOrder(order.id);
+      } catch {
+        // Ignore rollback errors
+      }
+      throw error;
     }
 
     // Update state
@@ -230,23 +261,25 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
       (p) => p.id === paymentId || p.status === 'paid'
     );
 
+    let updatedOrder: Order | null = null;
     if (allPaid) {
       const order = orders.find((o) => o.id === payment.orderId);
       if (order) {
-        const updatedOrder = { ...order, status: 'completed' as const };
+        updatedOrder = { ...order, status: 'completed' as const };
         await storage.saveOrder(updatedOrder);
-        set((state) => ({
-          orders: state.orders.map((o) =>
-            o.id === payment.orderId ? updatedOrder : o
-          ),
-        }));
       }
     }
 
+    // Single atomic state update for both payment and order
     set((state) => ({
       payments: state.payments.map((p) =>
         p.id === paymentId ? updatedPayment : p
       ),
+      orders: updatedOrder
+        ? state.orders.map((o) =>
+            o.id === payment.orderId ? updatedOrder! : o
+          )
+        : state.orders,
     }));
   },
 
@@ -270,20 +303,22 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
 
     // Update order status back to active if it was completed
     const order = orders.find((o) => o.id === payment.orderId);
+    let updatedOrder: Order | null = null;
     if (order && order.status === 'completed') {
-      const updatedOrder = { ...order, status: 'active' as const };
+      updatedOrder = { ...order, status: 'active' as const };
       await storage.saveOrder(updatedOrder);
-      set((state) => ({
-        orders: state.orders.map((o) =>
-          o.id === payment.orderId ? updatedOrder : o
-        ),
-      }));
     }
 
+    // Single atomic state update for both payment and order
     set((state) => ({
       payments: state.payments.map((p) =>
         p.id === paymentId ? updatedPayment : p
       ),
+      orders: updatedOrder
+        ? state.orders.map((o) =>
+            o.id === payment.orderId ? updatedOrder! : o
+          )
+        : state.orders,
     }));
 
     // Check for overdue
@@ -401,6 +436,12 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
         }),
       }));
     }
+  },
+
+  // Update notification settings
+  updateNotificationSettings: (settings: NotificationSettings) => {
+    storage.saveNotificationSettings(settings);
+    set({ notificationSettings: settings });
   },
 
   // UI Actions

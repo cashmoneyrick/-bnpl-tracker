@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { Card } from '../shared/Card';
 import { Button } from '../shared/Button';
+import { useToast } from '../shared/Toast';
 import { useBNPLStore } from '../../store';
 import { useOverduePayments, useOrder } from '../../store/selectors';
 import { formatCurrency } from '../../utils/currency';
@@ -10,17 +12,28 @@ function OverdueItem({
 }: {
   payment: ReturnType<typeof useOverduePayments>[0];
 }) {
+  const { showToast } = useToast();
   const order = useOrder(payment.orderId);
   const markPaymentPaid = useBNPLStore((state) => state.markPaymentPaid);
   const openOrderDetailModal = useBNPLStore((state) => state.openOrderDetailModal);
   const platforms = useBNPLStore((state) => state.platforms);
+
+  const [isMarking, setIsMarking] = useState(false);
 
   const platform = platforms.find((p) => p.id === payment.platformId);
   const overdueText = getRelativeDateDescription(payment.dueDate);
 
   const handleMarkPaid = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    await markPaymentPaid(payment.id);
+    setIsMarking(true);
+    try {
+      await markPaymentPaid(payment.id);
+      showToast('Payment marked as paid', 'success');
+    } catch (error) {
+      showToast('Failed to mark payment', 'error');
+    } finally {
+      setIsMarking(false);
+    }
   };
 
   const handleRowClick = () => {
@@ -53,8 +66,8 @@ function OverdueItem({
           </div>
         </div>
       </div>
-      <Button variant="danger" size="sm" onClick={handleMarkPaid}>
-        Mark Paid
+      <Button variant="danger" size="sm" onClick={handleMarkPaid} disabled={isMarking}>
+        {isMarking ? 'Marking...' : 'Mark Paid'}
       </Button>
     </div>
   );

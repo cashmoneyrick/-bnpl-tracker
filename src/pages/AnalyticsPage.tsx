@@ -15,7 +15,7 @@ import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval, subMon
 import { Card } from '../components/shared/Card';
 import { Button } from '../components/shared/Button';
 import { useBNPLStore } from '../store';
-import { useAllPlatformStats, useMostUsedPlatform } from '../store/selectors';
+import { useAllPlatformStats, useMostUsedPlatform, useMonthComparison } from '../store/selectors';
 import { formatCurrency, centsToDollars } from '../utils/currency';
 import type { DateRangeOption } from '../types';
 
@@ -100,6 +100,7 @@ export function AnalyticsPage() {
     );
   }, [platformStats]);
 
+  const monthComparison = useMonthComparison();
   const mostUsedPlatformData = platforms.find((p) => p.id === mostUsedPlatform);
   const bestOnTimePlatformData = bestOnTimePlatform
     ? platforms.find((p) => p.id === bestOnTimePlatform.platformId)
@@ -127,6 +128,119 @@ export function AnalyticsPage() {
           ))}
         </div>
       </div>
+
+      {/* Month-over-Month Comparison */}
+      {(monthComparison.thisMonth.orders > 0 || monthComparison.lastMonth.orders > 0) && (
+        <Card>
+          <h3 className="text-lg font-semibold text-white mb-4">vs Last Month</h3>
+          <div className="grid grid-cols-3 gap-4">
+            {/* Spending */}
+            <div>
+              <p className="text-sm text-gray-400 mb-1">Spending</p>
+              <div className="flex items-center gap-2">
+                <span className="text-xl font-bold text-white">
+                  {formatCurrency(monthComparison.thisMonth.spending)}
+                </span>
+                {monthComparison.changes.spending !== null && (
+                  <span
+                    className={`text-sm font-medium flex items-center gap-0.5 ${
+                      monthComparison.changes.spending < 0
+                        ? 'text-green-400'
+                        : monthComparison.changes.spending > 0
+                        ? 'text-red-400'
+                        : 'text-gray-400'
+                    }`}
+                  >
+                    {monthComparison.changes.spending < 0 ? (
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                      </svg>
+                    ) : monthComparison.changes.spending > 0 ? (
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
+                      </svg>
+                    ) : null}
+                    {Math.abs(Math.round(monthComparison.changes.spending))}%
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                from {formatCurrency(monthComparison.lastMonth.spending)}
+              </p>
+            </div>
+
+            {/* Orders */}
+            <div>
+              <p className="text-sm text-gray-400 mb-1">Orders</p>
+              <div className="flex items-center gap-2">
+                <span className="text-xl font-bold text-white">
+                  {monthComparison.thisMonth.orders}
+                </span>
+                {monthComparison.changes.orders !== null && (
+                  <span
+                    className={`text-sm font-medium flex items-center gap-0.5 ${
+                      monthComparison.changes.orders < 0
+                        ? 'text-green-400'
+                        : monthComparison.changes.orders > 0
+                        ? 'text-amber-400'
+                        : 'text-gray-400'
+                    }`}
+                  >
+                    {monthComparison.changes.orders < 0 ? (
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                      </svg>
+                    ) : monthComparison.changes.orders > 0 ? (
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
+                      </svg>
+                    ) : null}
+                    {Math.abs(Math.round(monthComparison.changes.orders))}%
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                from {monthComparison.lastMonth.orders}
+              </p>
+            </div>
+
+            {/* Avg Order */}
+            <div>
+              <p className="text-sm text-gray-400 mb-1">Avg Order</p>
+              <div className="flex items-center gap-2">
+                <span className="text-xl font-bold text-white">
+                  {formatCurrency(monthComparison.thisMonth.avgOrder)}
+                </span>
+                {monthComparison.changes.avgOrder !== null && (
+                  <span
+                    className={`text-sm font-medium flex items-center gap-0.5 ${
+                      monthComparison.changes.avgOrder < 0
+                        ? 'text-green-400'
+                        : monthComparison.changes.avgOrder > 0
+                        ? 'text-amber-400'
+                        : 'text-gray-400'
+                    }`}
+                  >
+                    {monthComparison.changes.avgOrder < 0 ? (
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                      </svg>
+                    ) : monthComparison.changes.avgOrder > 0 ? (
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
+                      </svg>
+                    ) : null}
+                    {Math.abs(Math.round(monthComparison.changes.avgOrder))}%
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                from {formatCurrency(monthComparison.lastMonth.avgOrder)}
+              </p>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Insights */}
       {(mostUsedPlatformData || bestOnTimePlatformData) && (

@@ -6,8 +6,6 @@
 // 2. The PlatformId type and PLATFORM_COLORS will update automatically
 // =============================================================================
 
-import type { Subscription } from '../types';
-
 // Platform configuration - source of truth for all platform data
 export const DEFAULT_PLATFORMS = [
   {
@@ -62,6 +60,15 @@ export const DEFAULT_PLATFORMS = [
 
 // Derive PlatformId type from DEFAULT_PLATFORMS
 export type PlatformId = (typeof DEFAULT_PLATFORMS)[number]['id'];
+
+// Subscription interface defined here to avoid circular dependency with types/index.ts
+export interface Subscription {
+  platformId: PlatformId;
+  isActive: boolean;
+  monthlyCost: number;
+  benefits: string[];
+  startDate?: string;
+}
 
 // Platform interface (mutable version for runtime use)
 export interface Platform {

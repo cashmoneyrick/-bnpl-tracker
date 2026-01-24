@@ -16,10 +16,11 @@ export function SummaryCards() {
   // Filter platforms with credit limit > 0, sort by available (descending)
   const platformCredits = utilizations
     .filter((u) => u.limit > 0)
-    .map((u) => ({
-      ...u,
-      platform: platforms.find((p) => p.id === u.platformId)!,
-    }))
+    .map((u) => {
+      const platform = platforms.find((p) => p.id === u.platformId);
+      return platform ? { ...u, platform } : null;
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
     .sort((a, b) => b.available - a.available);
 
   const totalAvailable = platformCredits.reduce((sum, p) => sum + p.available, 0);

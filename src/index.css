@@ -45,3 +45,19 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 /* Platform colors are defined in src/constants/platforms.ts
    Use inline styles with platform.color for dynamic coloring */
+
+/* Toast animation */
+@keyframes slide-in {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in {
+  animation: slide-in 0.3s ease-out;
+}

@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { Modal } from '../shared/Modal';
 import { Button } from '../shared/Button';
+import { useToast } from '../shared/Toast';
 import { useBNPLStore } from '../../store';
 import { useOrder, useOrderPayments, usePlatform } from '../../store/selectors';
 import { formatCurrency } from '../../utils/currency';
 import { format, parseISO } from 'date-fns';
 
 export function OrderDetailModal() {
+  const { showToast } = useToast();
   const isOpen = useBNPLStore((state) => state.orderDetailModalOpen);
   const selectedOrderId = useBNPLStore((state) => state.selectedOrderId);
   const closeModal = useBNPLStore((state) => state.closeOrderDetailModal);
@@ -15,6 +17,7 @@ export function OrderDetailModal() {
   const deleteOrder = useBNPLStore((state) => state.deleteOrder);
 
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const order = useOrder(selectedOrderId || '');
   const payments = useOrderPayments(selectedOrderId || '');
@@ -32,17 +35,20 @@ export function OrderDetailModal() {
     await markPaymentUnpaid(paymentId);
   };
 
-  const handleDelete = async () => {
-    if (!window.confirm('Are you sure you want to delete this order? This cannot be undone.')) {
-      return;
-    }
+  const handleDeleteClick = () => {
+    setShowDeleteConfirm(true);
+  };
 
+  const handleConfirmDelete = async () => {
     setIsDeleting(true);
     try {
       await deleteOrder(order.id);
+      showToast('Order deleted', 'success');
+      setShowDeleteConfirm(false);
       closeModal();
     } catch (error) {
       console.error('Failed to delete order:', error);
+      showToast('Failed to delete order', 'error');
     } finally {
       setIsDeleting(false);
     }
@@ -197,7 +203,7 @@ export function OrderDetailModal() {
         {/* Delete Order */}
         <div className="pt-4 border-t border-dark-border">
           <button
-            onClick={handleDelete}
+            onClick={handleDeleteClick}
             disabled={isDeleting}
             className="flex items-center gap-2 text-sm text-red-400 hover:text-red-300 transition-colors disabled:opacity-50"
           >
@@ -214,10 +220,39 @@ export function OrderDetailModal() {
                 d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
               />
             </svg>
-            {isDeleting ? 'Deleting...' : 'Delete Order'}
+            Delete Order
           </button>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        isOpen={showDeleteConfirm}
+        onClose={() => setShowDeleteConfirm(false)}
+        title="Delete Order"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+            <p className="text-red-400 text-sm font-medium">Warning</p>
+            <p className="text-gray-300 text-sm mt-1">
+              This will permanently delete this order and all its payments. This cannot be undone.
+            </p>
+          </div>
+          <div className="flex justify-end gap-3">
+            <Button
+              variant="secondary"
+              onClick={() => setShowDeleteConfirm(false)}
+              disabled={isDeleting}
+            >
+              Cancel
+            </Button>
+            <Button variant="danger" onClick={handleConfirmDelete} disabled={isDeleting}>
+              {isDeleting ? 'Deleting...' : 'Delete Order'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </Modal>
   );
 }

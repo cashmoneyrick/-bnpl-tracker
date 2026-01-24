@@ -4,6 +4,7 @@ import { QuickAddFAB } from './QuickAddFAB';
 import { useBNPLStore } from '../../store';
 import { useTotalOwed } from '../../store/selectors';
 import { formatCurrency } from '../../utils/currency';
+import { checkPaymentsAndNotify } from '../../services/notifications';
 
 interface LayoutProps {
   children: ReactNode;
@@ -12,6 +13,10 @@ interface LayoutProps {
 export function Layout({ children }: LayoutProps) {
   const totalOwed = useTotalOwed();
   const initialize = useBNPLStore((state) => state.initialize);
+  const isInitialized = useBNPLStore((state) => state.isInitialized);
+  const payments = useBNPLStore((state) => state.payments);
+  const platforms = useBNPLStore((state) => state.platforms);
+  const notificationSettings = useBNPLStore((state) => state.notificationSettings);
   const openQuickAddModal = useBNPLStore((state) => state.openQuickAddModal);
 
   // Initialize store on mount
@@ -49,6 +54,20 @@ export function Layout({ children }: LayoutProps) {
 
     return () => clearInterval(interval);
   }, []);
+
+  // Check for payment notifications on app load
+  useEffect(() => {
+    if (!isInitialized) return;
+
+    // Build platform name map
+    const platformNames: Record<string, string> = {};
+    for (const platform of platforms) {
+      platformNames[platform.id] = platform.name;
+    }
+
+    // Check and show notifications
+    checkPaymentsAndNotify(payments, notificationSettings, platformNames);
+  }, [isInitialized]); // Only run once when store initializes
 
   return (
     <div className="flex min-h-screen bg-dark-bg">
