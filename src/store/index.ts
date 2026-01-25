@@ -21,6 +21,7 @@ interface BNPLStore {
   platforms: Platform[];
   subscriptions: Subscription[];
   notificationSettings: NotificationSettings;
+  geminiApiKey: string | null;
   isLoading: boolean;
   isInitialized: boolean;
 
@@ -46,6 +47,7 @@ interface BNPLStore {
   updateSubscription: (subscription: Subscription) => Promise<void>;
   updateOverduePayments: () => Promise<void>;
   updateNotificationSettings: (settings: NotificationSettings) => void;
+  setGeminiApiKey: (key: string | null) => void;
 
   // UI Actions
   openQuickAddModal: () => void;
@@ -71,6 +73,7 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
     notifyOnDueDate: true,
     notifyOverdue: true,
   },
+  geminiApiKey: null,
   isLoading: false,
   isInitialized: false,
 
@@ -96,6 +99,7 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
       ]);
 
       const notificationSettings = storage.getNotificationSettings();
+      const geminiApiKey = storage.getGeminiApiKey();
 
       set({
         orders,
@@ -103,6 +107,7 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
         platforms,
         subscriptions,
         notificationSettings,
+        geminiApiKey,
         isLoading: false,
         isInitialized: true,
       });
@@ -147,6 +152,7 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
       firstPaymentDate: input.firstPaymentDate,
       status: 'active',
       createdAt: new Date().toISOString(),
+      tags: input.tags,
       customInstallments: input.customInstallments,
       apr: input.apr,
     };
@@ -442,6 +448,16 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
   updateNotificationSettings: (settings: NotificationSettings) => {
     storage.saveNotificationSettings(settings);
     set({ notificationSettings: settings });
+  },
+
+  // Set Gemini API key
+  setGeminiApiKey: (key: string | null) => {
+    if (key) {
+      storage.saveGeminiApiKey(key);
+    } else {
+      storage.clearGeminiApiKey();
+    }
+    set({ geminiApiKey: key });
   },
 
   // UI Actions

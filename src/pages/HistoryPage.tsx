@@ -7,7 +7,7 @@ import { useBNPLStore } from '../store';
 import { useOrderPayments } from '../store/selectors';
 import { formatCurrency } from '../utils/currency';
 import { formatDate } from '../utils/date';
-import type { Order, PlatformId } from '../types';
+import { ORDER_TAG_OPTIONS, type Order, type PlatformId } from '../types';
 
 function OrderPayments({ orderId }: { orderId: string }) {
   const payments = useOrderPayments(orderId);
@@ -117,6 +117,18 @@ function OrderCard({ order, isExpanded, onToggle }: { order: Order; isExpanded: 
                 <span className="ml-2 text-green-400">Completed</span>
               )}
             </div>
+            {order.tags && order.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1">
+                {order.tags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="px-2 py-0.5 text-xs bg-dark-hover text-gray-400 rounded-full"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -216,6 +228,7 @@ export function HistoryPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [platformFilter, setPlatformFilter] = useState<PlatformId | 'all'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'completed'>('active');
+  const [tagFilter, setTagFilter] = useState<string | 'all'>('all');
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
 
   // Filter orders
@@ -230,6 +243,13 @@ export function HistoryPage() {
         // Status filter
         if (statusFilter !== 'all' && order.status !== statusFilter) {
           return false;
+        }
+
+        // Tag filter
+        if (tagFilter !== 'all') {
+          if (!order.tags || !order.tags.includes(tagFilter)) {
+            return false;
+          }
         }
 
         // Search filter
@@ -249,7 +269,7 @@ export function HistoryPage() {
         (a, b) =>
           parseISO(b.createdAt).getTime() - parseISO(a.createdAt).getTime()
       );
-  }, [orders, platformFilter, statusFilter, searchQuery, platforms]);
+  }, [orders, platformFilter, statusFilter, tagFilter, searchQuery, platforms]);
 
   return (
     <div className="space-y-6">
@@ -297,6 +317,20 @@ export function HistoryPage() {
             <option value="all">All Status</option>
             <option value="active">Active</option>
             <option value="completed">Completed</option>
+          </select>
+
+          {/* Tag Filter */}
+          <select
+            value={tagFilter}
+            onChange={(e) => setTagFilter(e.target.value)}
+            className="px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="all">All Categories</option>
+            {ORDER_TAG_OPTIONS.map((tag) => (
+              <option key={tag} value={tag}>
+                {tag}
+              </option>
+            ))}
           </select>
         </div>
       </Card>

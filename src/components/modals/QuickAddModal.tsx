@@ -5,14 +5,15 @@ import { Button } from '../shared/Button';
 import { useToast } from '../shared/Toast';
 import { useBNPLStore } from '../../store';
 import { calculatePayments } from '../../services/paymentCalculator';
+import { extractOrderFromImage } from '../../services/gemini';
 import {
   formatCurrency,
   parseDollarInput,
   formatNumberInput,
 } from '../../utils/currency';
 import { formatDateInput, isValidDateString } from '../../utils/date';
-import { parseISO } from 'date-fns';
-import type { PlatformId } from '../../types';
+import { parseISO, format } from 'date-fns';
+import { ORDER_TAG_OPTIONS, type PlatformId } from '../../types';
 import { AFFIRM_INSTALLMENT_OPTIONS } from '../../constants/platforms';
 
 export function QuickAddModal() {
@@ -22,6 +23,7 @@ export function QuickAddModal() {
   const addOrder = useBNPLStore((state) => state.addOrder);
   const platforms = useBNPLStore((state) => state.platforms);
   const markPaymentPaid = useBNPLStore((state) => state.markPaymentPaid);
+  const geminiApiKey = useBNPLStore((state) => state.geminiApiKey);
 
   // Form state
   const [platformId, setPlatformId] = useState<PlatformId>('afterpay');
@@ -36,6 +38,9 @@ export function QuickAddModal() {
   const [customInstallments, setCustomInstallments] = useState(0);
   const [aprInput, setAprInput] = useState('0');
 
+  // Tags
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+
   // Manual overrides - tracks which payments have been manually edited
   const [overrides, setOverrides] = useState<
     Record<number, { amount?: number; dueDate?: string }>
@@ -48,6 +53,10 @@ export function QuickAddModal() {
 
   // Ref to track when JSON is being applied (prevents useEffect from clearing overrides)
   const isApplyingJsonRef = useRef(false);
+
+  // Screenshot import state
+  const screenshotInputRef = useRef<HTMLInputElement>(null);
+  const [isExtracting, setIsExtracting] = useState(false);
 
   // Track payments to mark as paid after order creation (from JSON import)
   const [pendingPaidPayments, setPendingPaidPayments] = useState<
@@ -382,11 +391,13 @@ export function QuickAddModal() {
       setFirstPaymentDate(formatDateInput(new Date()));
       setCustomInstallments(0);
       setAprInput('0');
+      setSelectedTags([]);
       setOverrides({});
       setShowJsonInput(false);
       setJsonInput('');
       setJsonError(null);
       setPendingPaidPayments([]);
+      setIsExtracting(false);
     }
   }, [isOpen]);
 
@@ -464,6 +475,60 @@ export function QuickAddModal() {
     }
   };
 
+  const handleScreenshotSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!geminiApiKey) {
+      showToast('Please add your Gemini API key in Settings first', 'error');
+      return;
+    }
+
+    setIsExtracting(true);
+    try {
+      const extracted = await extractOrderFromImage(file, geminiApiKey);
+
+      // Apply extracted data directly to form fields
+      // Note: Can't use setJsonInput + handleApplyJson because state updates are async
+      isApplyingJsonRef.current = true;
+
+      // Normalize platform (lowercase, remove spaces)
+      const normalizedPlatform = extracted.platform.toLowerCase().replace(/\s+/g, '');
+      if (VALID_PLATFORM_IDS.includes(normalizedPlatform as typeof VALID_PLATFORM_IDS[number])) {
+        setPlatformId(normalizedPlatform as PlatformId);
+      }
+
+      setStoreName(extracted.store || '');
+      setAmountInput(extracted.total.toFixed(2));
+      setFirstPaymentDate(extracted.payments[0]?.date || format(new Date(), 'yyyy-MM-dd'));
+      setCustomInstallments(extracted.payments.length);
+
+      // Build overrides from payments
+      const newOverrides: Record<number, { amount?: number; dueDate?: string }> = {};
+      extracted.payments.forEach((payment, index) => {
+        newOverrides[index + 1] = {
+          amount: Math.round(payment.amount * 100), // Convert to cents
+          dueDate: payment.date,
+        };
+      });
+      setOverrides(newOverrides);
+
+      // Track payments that should be marked as paid after order creation
+      const paidPayments = extracted.payments
+        .map((p, i) => ({ installment: i + 1, status: p.status }))
+        .filter(p => p.status === 'paid')
+        .map(p => ({ installment: p.installment }));
+      setPendingPaidPayments(paidPayments);
+
+      showToast('Order extracted from screenshot', 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to extract order', 'error');
+    } finally {
+      setIsExtracting(false);
+      e.target.value = ''; // Reset file input
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -479,6 +544,7 @@ export function QuickAddModal() {
         storeName: storeName.trim() || undefined,
         totalAmount: amountInCents,
         firstPaymentDate,
+        tags: selectedTags.length > 0 ? selectedTags : undefined,
         customInstallments: customInstallments || undefined,
         apr:
           platformId === 'affirm' && parseFloat(aprInput) > 0
@@ -556,6 +622,41 @@ export function QuickAddModal() {
           onChange={(e) => setStoreName(e.target.value)}
         />
 
+        {/* Tags */}
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-2">
+            Category (optional)
+          </label>
+          <div className="flex flex-wrap gap-2">
+            {ORDER_TAG_OPTIONS.map((tag) => {
+              const isSelected = selectedTags.includes(tag);
+              return (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => {
+                    setSelectedTags((prev) =>
+                      isSelected
+                        ? prev.filter((t) => t !== tag)
+                        : [...prev, tag]
+                    );
+                  }}
+                  className={`
+                    px-3 py-1.5 rounded-full text-sm font-medium transition-colors
+                    ${
+                      isSelected
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-dark-hover text-gray-400 hover:text-white'
+                    }
+                  `}
+                >
+                  {tag}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Amount */}
         <Input
           label="Total Amount"
@@ -605,15 +706,41 @@ export function QuickAddModal() {
           </div>
         )}
 
-        {/* Paste JSON Link */}
+        {/* Hidden file input for screenshot import */}
+        <input
+          ref={screenshotInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleScreenshotSelect}
+        />
+
+        {/* Paste JSON / Import Screenshot Links */}
         {!showJsonInput && (
-          <button
-            type="button"
-            onClick={() => setShowJsonInput(true)}
-            className="text-sm text-blue-400 hover:text-blue-300 underline"
-          >
-            Paste JSON
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowJsonInput(true)}
+              className="text-sm text-blue-400 hover:text-blue-300 underline"
+            >
+              Paste JSON
+            </button>
+            <span className="text-gray-600">|</span>
+            <button
+              type="button"
+              onClick={() => {
+                if (!geminiApiKey) {
+                  showToast('Please add your Gemini API key in Settings first', 'error');
+                  return;
+                }
+                screenshotInputRef.current?.click();
+              }}
+              disabled={isExtracting}
+              className="text-sm text-blue-400 hover:text-blue-300 underline disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isExtracting ? 'Extracting...' : 'Import from Screenshot'}
+            </button>
+          </div>
         )}
 
         {/* JSON Input Section */}

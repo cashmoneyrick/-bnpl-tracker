@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Card } from '../components/shared/Card';
 import { Button } from '../components/shared/Button';
 import { Modal } from '../components/shared/Modal';
@@ -515,6 +515,90 @@ function NotificationSettingsCard() {
   );
 }
 
+function APIKeyCard() {
+  const { showToast } = useToast();
+  const geminiApiKey = useBNPLStore((state) => state.geminiApiKey);
+  const setGeminiApiKey = useBNPLStore((state) => state.setGeminiApiKey);
+
+  const [showKey, setShowKey] = useState(false);
+  const [inputValue, setInputValue] = useState(geminiApiKey || '');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+
+  // Sync input when store value changes
+  useEffect(() => {
+    setInputValue(geminiApiKey || '');
+  }, [geminiApiKey]);
+
+  const handleSave = useCallback(() => {
+    const trimmedKey = inputValue.trim();
+    if (trimmedKey !== (geminiApiKey || '')) {
+      setSaveStatus('saving');
+      setGeminiApiKey(trimmedKey || null);
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 2000);
+      showToast(trimmedKey ? 'API key saved' : 'API key cleared', 'success');
+    }
+  }, [inputValue, geminiApiKey, setGeminiApiKey, showToast]);
+
+  return (
+    <Card>
+      <h2 className="text-lg font-semibold text-white mb-4">API Keys</h2>
+      <p className="text-sm text-gray-400 mb-4">
+        Configure API keys for enhanced features.
+      </p>
+
+      <div className="space-y-4">
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-white">Gemini API Key</label>
+            {saveStatus !== 'idle' && (
+              <span className={`text-xs ${saveStatus === 'saving' ? 'text-gray-400' : 'text-green-400'}`}>
+                {saveStatus === 'saving' ? 'Saving...' : 'Saved'}
+              </span>
+            )}
+          </div>
+          <p className="text-sm text-gray-400 mb-3">
+            Used for screenshot import feature. Get a free key from{' '}
+            <a
+              href="https://aistudio.google.com/apikey"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-400 hover:text-blue-300 underline"
+            >
+              Google AI Studio
+            </a>
+          </p>
+          <div className="flex gap-2">
+            <input
+              type={showKey ? 'text' : 'password'}
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onBlur={handleSave}
+              onKeyDown={(e) => e.key === 'Enter' && handleSave()}
+              placeholder="AIzaSy..."
+              className="flex-1 px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <Button
+              variant="secondary"
+              onClick={() => setShowKey(!showKey)}
+            >
+              {showKey ? 'Hide' : 'Show'}
+            </Button>
+            <Button onClick={handleSave}>
+              Save
+            </Button>
+          </div>
+          {geminiApiKey && (
+            <p className="text-xs text-green-400 mt-2">
+              API key configured
+            </p>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 export function SettingsPage() {
   const { showToast } = useToast();
   const platforms = useBNPLStore((state) => state.platforms);
@@ -635,6 +719,9 @@ export function SettingsPage() {
 
       {/* Notifications */}
       <NotificationSettingsCard />
+
+      {/* API Keys */}
+      <APIKeyCard />
 
       {/* Data Management */}
       <Card>

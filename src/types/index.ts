@@ -12,10 +12,23 @@ export interface Order {
   firstPaymentDate: string; // ISO date
   status: 'active' | 'completed';
   createdAt: string; // ISO timestamp
+  tags?: string[]; // e.g., ['groceries', 'electronics']
   // Affirm-specific fields
   customInstallments?: number;
   apr?: number; // e.g., 0.15 = 15%
 }
+
+// Default tag options for orders
+export const ORDER_TAG_OPTIONS = [
+  'Groceries',
+  'Electronics',
+  'Clothing',
+  'Home',
+  'Entertainment',
+  'Health',
+  'Travel',
+  'Other',
+] as const;
 
 export interface Payment {
   id: string;
@@ -36,6 +49,7 @@ export interface NewOrderInput {
   storeName?: string;
   totalAmount: number; // in cents
   firstPaymentDate: string; // ISO date
+  tags?: string[];
   customInstallments?: number; // for Affirm
   apr?: number; // for Affirm
   paymentOverrides?: Record<number, { amount?: number; dueDate?: string }>; // installmentNumber -> overrides

@@ -5,6 +5,7 @@ const DB_NAME = 'bnpl-tracker';
 const DB_VERSION = 1;
 const BACKUP_KEY = 'bnpl-tracker-backup';
 const NOTIFICATION_SETTINGS_KEY = 'bnpl-notification-settings';
+const GEMINI_API_KEY_KEY = 'bnpl-gemini-api-key';
 
 interface DBSchema {
   orders: Order;
@@ -332,6 +333,34 @@ class StorageService {
       console.log('[Storage] Notification settings saved');
     } catch (err) {
       console.warn('[Storage] Failed to save notification settings:', err);
+    }
+  }
+
+  // Gemini API Key (stored in localStorage)
+  getGeminiApiKey(): string | null {
+    try {
+      return localStorage.getItem(GEMINI_API_KEY_KEY);
+    } catch (err) {
+      console.warn('[Storage] Failed to read Gemini API key:', err);
+      return null;
+    }
+  }
+
+  saveGeminiApiKey(key: string): void {
+    try {
+      localStorage.setItem(GEMINI_API_KEY_KEY, key);
+      console.log('[Storage] Gemini API key saved');
+    } catch (err) {
+      console.warn('[Storage] Failed to save Gemini API key:', err);
+    }
+  }
+
+  clearGeminiApiKey(): void {
+    try {
+      localStorage.removeItem(GEMINI_API_KEY_KEY);
+      console.log('[Storage] Gemini API key cleared');
+    } catch (err) {
+      console.warn('[Storage] Failed to clear Gemini API key:', err);
     }
   }
 

@@ -72,6 +72,18 @@ export function OrderDetailModal() {
             {order.storeName && (
               <p className="text-sm text-gray-400">{order.storeName}</p>
             )}
+            {order.tags && order.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1">
+                {order.tags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="px-2 py-0.5 text-xs bg-dark-hover text-gray-400 rounded-full"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
