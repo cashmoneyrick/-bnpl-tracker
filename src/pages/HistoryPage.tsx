@@ -1,10 +1,12 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { parseISO } from 'date-fns';
 import { Card } from '../components/shared/Card';
 import { Button } from '../components/shared/Button';
 import { Input } from '../components/shared/Input';
+import { PlatformIcon } from '../components/shared/PlatformIcon';
 import { useBNPLStore } from '../store';
-import { useOrderPayments } from '../store/selectors';
+import { useOrderPayments, useOrderProgress } from '../store/selectors';
 import { formatCurrency } from '../utils/currency';
 import { formatDate } from '../utils/date';
 import { ORDER_TAG_OPTIONS, type Order, type PlatformId } from '../types';
@@ -67,6 +69,28 @@ function OrderPayments({ orderId }: { orderId: string }) {
   );
 }
 
+function OrderProgress({ orderId }: { orderId: string }) {
+  const progress = useOrderProgress(orderId);
+
+  if (progress.total === 0) return null;
+
+  return (
+    <div className="flex items-center gap-2 mt-2">
+      <div className="flex-1 h-1.5 bg-dark-hover rounded-full overflow-hidden">
+        <div
+          className={`h-full transition-all ${
+            progress.percentage === 100 ? 'bg-green-500' : 'bg-blue-500'
+          }`}
+          style={{ width: `${progress.percentage}%` }}
+        />
+      </div>
+      <span className="text-xs text-gray-500 whitespace-nowrap">
+        {progress.paid}/{progress.total} paid
+      </span>
+    </div>
+  );
+}
+
 function OrderCard({ order, isExpanded, onToggle }: { order: Order; isExpanded: boolean; onToggle: () => void }) {
   const platforms = useBNPLStore((state) => state.platforms);
   const deleteOrder = useBNPLStore((state) => state.deleteOrder);
@@ -93,11 +117,18 @@ function OrderCard({ order, isExpanded, onToggle }: { order: Order; isExpanded: 
         onClick={onToggle}
       >
         <div className="flex items-center gap-4">
-          <span
-            className="w-3 h-3 rounded-full"
-            style={{ backgroundColor: platform?.color || '#666' }}
-          />
-          <div>
+          <div
+            className="w-8 h-8 rounded-lg flex items-center justify-center"
+            style={{ backgroundColor: `${platform?.color}20` }}
+          >
+            <PlatformIcon
+              platformId={order.platformId}
+              size="sm"
+              className="opacity-90"
+              style={{ color: platform?.color }}
+            />
+          </div>
+          <div className="flex-1">
             <div className="flex items-center gap-2">
               <span className="font-medium text-white">
                 {formatCurrency(order.totalAmount)}
@@ -129,6 +160,7 @@ function OrderCard({ order, isExpanded, onToggle }: { order: Order; isExpanded: 
                 ))}
               </div>
             )}
+            <OrderProgress orderId={order.id} />
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -222,14 +254,32 @@ function OrderCard({ order, isExpanded, onToggle }: { order: Order; isExpanded: 
 }
 
 export function HistoryPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const orders = useBNPLStore((state) => state.orders);
   const platforms = useBNPLStore((state) => state.platforms);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [platformFilter, setPlatformFilter] = useState<PlatformId | 'all'>('all');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'completed'>('active');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'completed'>(() => {
+    const urlStatus = searchParams.get('status');
+    if (urlStatus === 'active' || urlStatus === 'completed' || urlStatus === 'all') {
+      return urlStatus;
+    }
+    return 'active';
+  });
   const [tagFilter, setTagFilter] = useState<string | 'all'>('all');
+  const [sortBy, setSortBy] = useState<'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc'>('date-desc');
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
+
+  // Sync status filter to URL
+  useEffect(() => {
+    if (statusFilter !== 'active') {
+      searchParams.set('status', statusFilter);
+    } else {
+      searchParams.delete('status');
+    }
+    setSearchParams(searchParams, { replace: true });
+  }, [statusFilter, searchParams, setSearchParams]);
 
   // Filter orders
   const filteredOrders = useMemo(() => {
@@ -265,11 +315,20 @@ export function HistoryPage() {
 
         return true;
       })
-      .sort(
-        (a, b) =>
-          parseISO(b.createdAt).getTime() - parseISO(a.createdAt).getTime()
-      );
-  }, [orders, platformFilter, statusFilter, tagFilter, searchQuery, platforms]);
+      .sort((a, b) => {
+        switch (sortBy) {
+          case 'date-asc':
+            return parseISO(a.createdAt).getTime() - parseISO(b.createdAt).getTime();
+          case 'amount-desc':
+            return b.totalAmount - a.totalAmount;
+          case 'amount-asc':
+            return a.totalAmount - b.totalAmount;
+          case 'date-desc':
+          default:
+            return parseISO(b.createdAt).getTime() - parseISO(a.createdAt).getTime();
+        }
+      });
+  }, [orders, platformFilter, statusFilter, tagFilter, searchQuery, platforms, sortBy]);
 
   return (
     <div className="space-y-6">
@@ -280,58 +339,117 @@ export function HistoryPage() {
 
       {/* Filters */}
       <Card padding="md">
-        <div className="flex flex-col md:flex-row gap-4">
-          {/* Search */}
-          <div className="flex-1">
-            <Input
-              placeholder="Search by store or platform..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
+        <div className="space-y-4">
+          {/* Search and Sort Row */}
+          <div className="flex flex-col md:flex-row gap-4">
+            {/* Search with clear button */}
+            <div className="flex-1 relative">
+              <Input
+                placeholder="Search by store or platform..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
+
+            {/* Sort */}
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+              className="px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="date-desc">Newest First</option>
+              <option value="date-asc">Oldest First</option>
+              <option value="amount-desc">Highest Amount</option>
+              <option value="amount-asc">Lowest Amount</option>
+            </select>
           </div>
 
-          {/* Platform Filter */}
-          <select
-            value={platformFilter}
-            onChange={(e) =>
-              setPlatformFilter(e.target.value as PlatformId | 'all')
-            }
-            className="px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="all">All Platforms</option>
+          {/* Filter Chips */}
+          <div className="flex flex-wrap gap-2">
+            {/* Status Chips */}
+            {(['all', 'active', 'completed'] as const).map((status) => (
+              <button
+                key={status}
+                onClick={() => setStatusFilter(status)}
+                className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
+                  statusFilter === status
+                    ? 'bg-blue-500/20 text-blue-400 border border-blue-500/50'
+                    : 'bg-dark-hover text-gray-400 border border-dark-border hover:border-gray-600'
+                }`}
+              >
+                {status === 'all' ? 'All' : status.charAt(0).toUpperCase() + status.slice(1)}
+              </button>
+            ))}
+
+            <div className="w-px h-6 bg-dark-border self-center mx-1" />
+
+            {/* Platform Chips */}
+            <button
+              onClick={() => setPlatformFilter('all')}
+              className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
+                platformFilter === 'all'
+                  ? 'bg-blue-500/20 text-blue-400 border border-blue-500/50'
+                  : 'bg-dark-hover text-gray-400 border border-dark-border hover:border-gray-600'
+              }`}
+            >
+              All Platforms
+            </button>
             {platforms.map((platform) => (
-              <option key={platform.id} value={platform.id}>
+              <button
+                key={platform.id}
+                onClick={() => setPlatformFilter(platform.id)}
+                className={`px-3 py-1.5 text-sm rounded-full transition-colors flex items-center gap-1.5 ${
+                  platformFilter === platform.id
+                    ? 'bg-blue-500/20 text-blue-400 border border-blue-500/50'
+                    : 'bg-dark-hover text-gray-400 border border-dark-border hover:border-gray-600'
+                }`}
+              >
+                <span
+                  className="w-2 h-2 rounded-full"
+                  style={{ backgroundColor: platform.color }}
+                />
                 {platform.name}
-              </option>
+              </button>
             ))}
-          </select>
+          </div>
 
-          {/* Status Filter */}
-          <select
-            value={statusFilter}
-            onChange={(e) =>
-              setStatusFilter(e.target.value as 'all' | 'active' | 'completed')
-            }
-            className="px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="all">All Status</option>
-            <option value="active">Active</option>
-            <option value="completed">Completed</option>
-          </select>
-
-          {/* Tag Filter */}
-          <select
-            value={tagFilter}
-            onChange={(e) => setTagFilter(e.target.value)}
-            className="px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="all">All Categories</option>
+          {/* Tag Chips */}
+          <div className="flex flex-wrap gap-2">
+            <span className="text-xs text-gray-500 self-center mr-1">Category:</span>
+            <button
+              onClick={() => setTagFilter('all')}
+              className={`px-2 py-1 text-xs rounded-full transition-colors ${
+                tagFilter === 'all'
+                  ? 'bg-blue-500/20 text-blue-400 border border-blue-500/50'
+                  : 'bg-dark-hover text-gray-400 border border-dark-border hover:border-gray-600'
+              }`}
+            >
+              All
+            </button>
             {ORDER_TAG_OPTIONS.map((tag) => (
-              <option key={tag} value={tag}>
+              <button
+                key={tag}
+                onClick={() => setTagFilter(tag)}
+                className={`px-2 py-1 text-xs rounded-full transition-colors ${
+                  tagFilter === tag
+                    ? 'bg-blue-500/20 text-blue-400 border border-blue-500/50'
+                    : 'bg-dark-hover text-gray-400 border border-dark-border hover:border-gray-600'
+                }`}
+              >
                 {tag}
-              </option>
+              </button>
             ))}
-          </select>
+          </div>
         </div>
       </Card>
 

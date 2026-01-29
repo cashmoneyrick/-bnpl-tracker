@@ -13,9 +13,11 @@ export interface Order {
   status: 'active' | 'completed';
   createdAt: string; // ISO timestamp
   tags?: string[]; // e.g., ['groceries', 'electronics']
-  // Affirm-specific fields
-  customInstallments?: number;
-  apr?: number; // e.g., 0.15 = 15%
+  notes?: string; // User notes, e.g., "Birthday gift for mom"
+  // Payment schedule
+  intervalDays?: number; // Days between payments, overrides platform default
+  customInstallments?: number; // For Affirm or custom schedules
+  apr?: number; // e.g., 0.15 = 15% (Affirm-specific)
 }
 
 // Default tag options for orders
@@ -50,7 +52,9 @@ export interface NewOrderInput {
   totalAmount: number; // in cents
   firstPaymentDate: string; // ISO date
   tags?: string[];
-  customInstallments?: number; // for Affirm
+  notes?: string;
+  intervalDays?: number; // Days between payments, overrides platform default
+  customInstallments?: number; // for Affirm or custom schedules
   apr?: number; // for Affirm
   paymentOverrides?: Record<number, { amount?: number; dueDate?: string }>; // installmentNumber -> overrides
 }

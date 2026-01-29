@@ -1,7 +1,7 @@
 import { SummaryCards } from '../components/dashboard/SummaryCards';
-import { PlatformUtilization } from '../components/dashboard/PlatformUtilization';
 import { UpcomingPayments } from '../components/dashboard/UpcomingPayments';
 import { OverdueAlerts } from '../components/dashboard/OverdueAlerts';
+import { InsightStrip } from '../components/dashboard/InsightStrip';
 
 export function DashboardPage() {
   return (
@@ -17,11 +17,11 @@ export function DashboardPage() {
       {/* Summary Cards */}
       <SummaryCards />
 
-      {/* Two column layout for utilization and upcoming */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <PlatformUtilization />
-        <UpcomingPayments />
-      </div>
+      {/* Upcoming Payments - full width, most important section */}
+      <UpcomingPayments />
+
+      {/* Subtle insight at bottom */}
+      <InsightStrip />
     </div>
   );
 }

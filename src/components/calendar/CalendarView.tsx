@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import {
   startOfMonth,
   endOfMonth,
@@ -36,75 +36,145 @@ function CalendarDay({
   onClick,
 }: CalendarDayProps) {
   const platforms = useBNPLStore((state) => state.platforms);
+  const orders = useBNPLStore((state) => state.orders);
   const today = isToday(date);
+  const [showTooltip, setShowTooltip] = useState(false);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+
+  // Calculate daily total (excluding paid)
+  const dailyTotal = payments
+    .filter((p) => p.status !== 'paid')
+    .reduce((sum, p) => sum + p.amount, 0);
+
+  // Color coding based on amount thresholds (in cents)
+  // Green: < $30 ($3000 cents), Yellow: $30-100, Red: > $100
+  const getAmountColor = () => {
+    if (dailyTotal === 0) return '';
+    if (dailyTotal < 3000) return 'bg-green-500/10';
+    if (dailyTotal < 10000) return 'bg-amber-500/10';
+    return 'bg-red-500/10';
+  };
 
   return (
-    <button
-      onClick={onClick}
-      className={`
-        min-h-[80px] p-2 text-left border border-dark-border rounded-lg transition-colors
-        ${!isCurrentMonth ? 'opacity-40' : ''}
-        ${isSelected ? 'bg-blue-500/20 border-blue-500' : 'hover:bg-dark-hover'}
-        ${today && !isSelected ? 'border-blue-500/50' : ''}
-      `}
-    >
-      <div className="flex items-center justify-between">
-        <span
-          className={`
-            text-sm font-medium
-            ${today ? 'text-blue-400' : isCurrentMonth ? 'text-white' : 'text-gray-600'}
-          `}
-        >
-          {format(date, 'd')}
-        </span>
-        {payments.length > 0 && (
-          <span className="text-xs text-gray-500">{payments.length}</span>
-        )}
-      </div>
-
-      {/* Payment dots */}
-      {payments.length > 0 && (
-        <div className="mt-2 space-y-1">
-          {/* Show up to 3 payment indicators */}
-          {payments.slice(0, 3).map((payment) => {
-            const platform = platforms.find((p) => p.id === payment.platformId);
-            const isOverdue = payment.status === 'overdue';
-            const isPaid = payment.status === 'paid';
-
-            return (
-              <div
-                key={payment.id}
-                className={`
-                  flex items-center gap-1.5 text-xs truncate
-                  ${isPaid ? 'opacity-50' : ''}
-                `}
-              >
-                <span
-                  className="w-2 h-2 rounded-full flex-shrink-0"
-                  style={{
-                    backgroundColor: isOverdue
-                      ? '#ef4444'
-                      : platform?.color || '#666',
-                  }}
-                />
-                <span
-                  className={`truncate ${
-                    isOverdue ? 'text-red-400' : isPaid ? 'text-gray-500 line-through' : 'text-gray-400'
-                  }`}
-                >
-                  {formatCurrency(payment.amount)}
-                </span>
-              </div>
-            );
-          })}
-          {payments.length > 3 && (
-            <span className="text-xs text-gray-500">
-              +{payments.length - 3} more
+    <div className="relative">
+      <button
+        onClick={onClick}
+        onMouseEnter={() => payments.length > 0 && setShowTooltip(true)}
+        onMouseLeave={() => setShowTooltip(false)}
+        className={`
+          w-full min-h-[80px] p-2 text-left border border-dark-border rounded-lg transition-colors
+          ${!isCurrentMonth ? 'opacity-40' : ''}
+          ${isSelected ? 'bg-blue-500/20 border-blue-500' : `hover:bg-dark-hover ${getAmountColor()}`}
+          ${today && !isSelected ? 'border-blue-500/50' : ''}
+        `}
+      >
+        <div className="flex items-center justify-between">
+          <span
+            className={`
+              text-sm font-medium
+              ${today ? 'text-blue-400' : isCurrentMonth ? 'text-white' : 'text-gray-600'}
+            `}
+          >
+            {format(date, 'd')}
+          </span>
+          {dailyTotal > 0 && (
+            <span className={`text-xs font-medium ${
+              dailyTotal < 3000 ? 'text-green-400' :
+              dailyTotal < 10000 ? 'text-amber-400' : 'text-red-400'
+            }`}>
+              {formatCurrency(dailyTotal)}
             </span>
           )}
         </div>
+
+        {/* Payment list */}
+        {payments.length > 0 && (
+          <div className="mt-2 space-y-1">
+            {/* Show up to 3 payment indicators */}
+            {payments.slice(0, 3).map((payment) => {
+              const platform = platforms.find((p) => p.id === payment.platformId);
+              const isOverdue = payment.status === 'overdue';
+              const isPaid = payment.status === 'paid';
+
+              return (
+                <div
+                  key={payment.id}
+                  className={`
+                    flex items-center gap-1.5 text-xs truncate
+                    ${isPaid ? 'opacity-50' : ''}
+                  `}
+                >
+                  <span
+                    className="w-2 h-2 rounded-full flex-shrink-0"
+                    style={{
+                      backgroundColor: isOverdue
+                        ? '#ef4444'
+                        : platform?.color || '#666',
+                    }}
+                  />
+                  <span
+                    className={`truncate ${
+                      isOverdue ? 'text-red-400' : isPaid ? 'text-gray-500 line-through' : 'text-gray-400'
+                    }`}
+                  >
+                    {formatCurrency(payment.amount)}
+                  </span>
+                </div>
+              );
+            })}
+            {payments.length > 3 && (
+              <span className="text-xs text-gray-500">
+                +{payments.length - 3} more
+              </span>
+            )}
+          </div>
+        )}
+      </button>
+
+      {/* Hover Tooltip */}
+      {showTooltip && payments.length > 0 && (
+        <div
+          ref={tooltipRef}
+          className="absolute z-50 left-1/2 -translate-x-1/2 top-full mt-1 w-48 bg-dark-card border border-dark-border rounded-lg shadow-lg p-3 animate-scale-in"
+        >
+          <div className="text-xs text-gray-400 mb-2">
+            {format(date, 'MMM d')} - {payments.length} payment{payments.length > 1 ? 's' : ''}
+          </div>
+          <div className="space-y-1.5">
+            {payments.slice(0, 5).map((payment) => {
+              const platform = platforms.find((p) => p.id === payment.platformId);
+              const order = orders.find((o) => o.id === payment.orderId);
+              const isPaid = payment.status === 'paid';
+              const isOverdue = payment.status === 'overdue';
+
+              return (
+                <div key={payment.id} className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1.5 truncate">
+                    <span
+                      className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                      style={{ backgroundColor: isOverdue ? '#ef4444' : platform?.color || '#666' }}
+                    />
+                    <span className={`truncate ${isPaid ? 'text-gray-500 line-through' : 'text-gray-300'}`}>
+                      {order?.storeName || platform?.name}
+                    </span>
+                  </div>
+                  <span className={`ml-2 font-medium ${
+                    isPaid ? 'text-gray-500' : isOverdue ? 'text-red-400' : 'text-white'
+                  }`}>
+                    {formatCurrency(payment.amount)}
+                  </span>
+                </div>
+              );
+            })}
+            {payments.length > 5 && (
+              <div className="text-xs text-gray-500 text-center pt-1">
+                +{payments.length - 5} more
+              </div>
+            )}
+          </div>
+        </div>
       )}
-    </button>
+    </div>
   );
 }
 
@@ -272,9 +342,9 @@ export function CalendarView() {
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
       {/* Calendar Grid */}
-      <div className="lg:col-span-2">
+      <div className="lg:col-span-3">
         <Card padding="lg">
           {/* Header */}
           <div className="flex items-center justify-between mb-6">

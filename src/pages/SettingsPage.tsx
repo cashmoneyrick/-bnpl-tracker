@@ -12,6 +12,16 @@ import {
 } from '../services/notifications';
 import type { PlatformId, ExportedData } from '../types';
 
+type SettingsTab = 'platforms' | 'subscriptions' | 'notifications' | 'api-keys' | 'data';
+
+const TABS: { id: SettingsTab; label: string }[] = [
+  { id: 'platforms', label: 'Platforms' },
+  { id: 'subscriptions', label: 'Subscriptions' },
+  { id: 'notifications', label: 'Notifications' },
+  { id: 'api-keys', label: 'API Keys' },
+  { id: 'data', label: 'Data' },
+];
+
 function PlatformSettings({ platformId }: { platformId: PlatformId }) {
   const platforms = useBNPLStore((state) => state.platforms);
   const updatePlatformLimit = useBNPLStore((state) => state.updatePlatformLimit);
@@ -27,7 +37,6 @@ function PlatformSettings({ platformId }: { platformId: PlatformId }) {
   const [intervalDays, setIntervalDays] = useState(platform?.defaultIntervalDays ?? 14);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
 
-  // Sync local state when platform data changes (e.g., after store updates)
   useEffect(() => {
     if (platform) {
       setLimitInput(centsToDollars(platform.creditLimit).toString());
@@ -67,7 +76,6 @@ function PlatformSettings({ platformId }: { platformId: PlatformId }) {
       </div>
 
       <div className="flex items-center gap-4">
-        {/* Credit Limit */}
         <div className="flex items-center gap-2">
           <span className="text-sm text-gray-400">Limit:</span>
           {isEditingLimit ? (
@@ -105,7 +113,6 @@ function PlatformSettings({ platformId }: { platformId: PlatformId }) {
           )}
         </div>
 
-        {/* Payment Schedule */}
         <div className="flex items-center gap-2">
           <span className="text-sm text-gray-400">Schedule:</span>
           <select
@@ -139,10 +146,9 @@ function PlatformSettings({ platformId }: { platformId: PlatformId }) {
           </select>
         </div>
 
-        {/* Save Status Indicator */}
         {saveStatus !== 'idle' && (
           <span className={`text-xs ${saveStatus === 'saving' ? 'text-gray-400' : 'text-green-400'}`}>
-            {saveStatus === 'saving' ? 'Saving...' : '✓ Saved'}
+            {saveStatus === 'saving' ? 'Saving...' : 'Saved'}
           </span>
         )}
       </div>
@@ -166,7 +172,6 @@ function SubscriptionSettings({ platformId }: { platformId: PlatformId }) {
   const [newBenefit, setNewBenefit] = useState('');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
 
-  // Sync local state when subscription data changes
   useEffect(() => {
     if (subscription) {
       setIsActive(subscription.isActive);
@@ -249,16 +254,14 @@ function SubscriptionSettings({ platformId }: { platformId: PlatformId }) {
             style={{ backgroundColor: platform.color }}
           />
           <span className="font-medium text-white">{platform.name}</span>
-          {/* Save Status Indicator */}
           {saveStatus !== 'idle' && (
             <span className={`text-xs ${saveStatus === 'saving' ? 'text-gray-400' : 'text-green-400'}`}>
-              {saveStatus === 'saving' ? 'Saving...' : '✓ Saved'}
+              {saveStatus === 'saving' ? 'Saving...' : 'Saved'}
             </span>
           )}
         </div>
 
         <div className="flex items-center gap-4">
-          {/* Active Toggle */}
           <button
             onClick={handleToggleActive}
             className={`
@@ -274,7 +277,6 @@ function SubscriptionSettings({ platformId }: { platformId: PlatformId }) {
             />
           </button>
 
-          {/* Monthly Cost */}
           {isActive && (
             <div className="flex items-center gap-2">
               <span className="text-sm text-gray-400">$/mo:</span>
@@ -290,7 +292,6 @@ function SubscriptionSettings({ platformId }: { platformId: PlatformId }) {
         </div>
       </div>
 
-      {/* Benefits */}
       {isActive && (
         <div className="mt-4 pl-7">
           <p className="text-sm text-gray-400 mb-2">Benefits:</p>
@@ -306,18 +307,8 @@ function SubscriptionSettings({ platformId }: { platformId: PlatformId }) {
                     onClick={() => handleRemoveBenefit(index)}
                     className="text-gray-500 hover:text-red-400"
                   >
-                    <svg
-                      className="w-4 h-4"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M6 18L18 6M6 6l12 12"
-                      />
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     </svg>
                   </button>
                 </li>
@@ -343,7 +334,7 @@ function SubscriptionSettings({ platformId }: { platformId: PlatformId }) {
   );
 }
 
-function NotificationSettingsCard() {
+function NotificationsTab() {
   const { showToast } = useToast();
   const notificationSettings = useBNPLStore((state) => state.notificationSettings);
   const updateNotificationSettings = useBNPLStore((state) => state.updateNotificationSettings);
@@ -358,7 +349,6 @@ function NotificationSettingsCard() {
 
   const handleToggleEnabled = async () => {
     if (!notificationSettings.enabled) {
-      // Enabling - request permission first
       const granted = await requestPermission();
       setPermissionStatus(getPermissionStatus());
 
@@ -369,153 +359,101 @@ function NotificationSettingsCard() {
         showToast('Notification permission denied', 'error');
       }
     } else {
-      // Disabling
       updateNotificationSettings({ ...notificationSettings, enabled: false });
       showToast('Notifications disabled', 'info');
     }
   };
 
-  const handleDaysBeforeChange = (days: number) => {
-    updateNotificationSettings({ ...notificationSettings, daysBefore: days });
-  };
-
-  const handleToggleOnDueDate = () => {
-    updateNotificationSettings({
-      ...notificationSettings,
-      notifyOnDueDate: !notificationSettings.notifyOnDueDate,
-    });
-  };
-
-  const handleToggleOverdue = () => {
-    updateNotificationSettings({
-      ...notificationSettings,
-      notifyOverdue: !notificationSettings.notifyOverdue,
-    });
-  };
-
   if (!isSupported) {
     return (
-      <Card>
-        <h2 className="text-lg font-semibold text-white mb-4">Notifications</h2>
-        <p className="text-sm text-gray-400">
-          Browser notifications are not supported in this browser.
-        </p>
-      </Card>
+      <p className="text-sm text-gray-400">
+        Browser notifications are not supported in this browser.
+      </p>
     );
   }
 
   return (
-    <Card>
-      <h2 className="text-lg font-semibold text-white mb-4">Notifications</h2>
-      <p className="text-sm text-gray-400 mb-4">
+    <div className="space-y-4">
+      <p className="text-sm text-gray-400">
         Get browser notifications for upcoming and overdue payments.
       </p>
 
-      <div className="space-y-4">
-        {/* Enable/Disable Toggle */}
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-white">Enable Notifications</p>
-            {isDenied && (
-              <p className="text-sm text-amber-400 mt-1">
-                Permission denied. Please enable in browser settings.
-              </p>
-            )}
-          </div>
-          <button
-            onClick={handleToggleEnabled}
-            disabled={isDenied}
-            className={`
-              relative w-12 h-6 rounded-full transition-colors disabled:opacity-50
-              ${notificationSettings.enabled && isGranted ? 'bg-blue-600' : 'bg-dark-border'}
-            `}
-          >
-            <span
-              className={`
-                absolute top-1 w-4 h-4 rounded-full bg-white transition-transform
-                ${notificationSettings.enabled && isGranted ? 'left-7' : 'left-1'}
-              `}
-            />
-          </button>
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-white">Enable Notifications</p>
+          {isDenied && (
+            <p className="text-sm text-amber-400 mt-1">
+              Permission denied. Please enable in browser settings.
+            </p>
+          )}
         </div>
-
-        {/* Settings (only show if enabled) */}
-        {notificationSettings.enabled && isGranted && (
-          <>
-            {/* Days Before */}
-            <div className="flex items-center justify-between pt-4 border-t border-dark-border">
-              <div>
-                <p className="text-white">Advance Notice</p>
-                <p className="text-sm text-gray-400">
-                  How many days before to notify
-                </p>
-              </div>
-              <select
-                value={notificationSettings.daysBefore}
-                onChange={(e) => handleDaysBeforeChange(Number(e.target.value))}
-                className="px-3 py-1.5 bg-dark-card border border-dark-border rounded-lg text-white"
-              >
-                <option value={1}>1 day</option>
-                <option value={2}>2 days</option>
-                <option value={3}>3 days</option>
-              </select>
-            </div>
-
-            {/* Notify on due date */}
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-white">Notify on Due Date</p>
-                <p className="text-sm text-gray-400">
-                  Remind me when payment is due today
-                </p>
-              </div>
-              <button
-                onClick={handleToggleOnDueDate}
-                className={`
-                  relative w-12 h-6 rounded-full transition-colors
-                  ${notificationSettings.notifyOnDueDate ? 'bg-blue-600' : 'bg-dark-border'}
-                `}
-              >
-                <span
-                  className={`
-                    absolute top-1 w-4 h-4 rounded-full bg-white transition-transform
-                    ${notificationSettings.notifyOnDueDate ? 'left-7' : 'left-1'}
-                  `}
-                />
-              </button>
-            </div>
-
-            {/* Notify when overdue */}
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-white">Notify When Overdue</p>
-                <p className="text-sm text-gray-400">
-                  Alert me about missed payments
-                </p>
-              </div>
-              <button
-                onClick={handleToggleOverdue}
-                className={`
-                  relative w-12 h-6 rounded-full transition-colors
-                  ${notificationSettings.notifyOverdue ? 'bg-blue-600' : 'bg-dark-border'}
-                `}
-              >
-                <span
-                  className={`
-                    absolute top-1 w-4 h-4 rounded-full bg-white transition-transform
-                    ${notificationSettings.notifyOverdue ? 'left-7' : 'left-1'}
-                  `}
-                />
-              </button>
-            </div>
-          </>
-        )}
+        <button
+          onClick={handleToggleEnabled}
+          disabled={isDenied}
+          className={`
+            relative w-12 h-6 rounded-full transition-colors disabled:opacity-50
+            ${notificationSettings.enabled && isGranted ? 'bg-blue-600' : 'bg-dark-border'}
+          `}
+        >
+          <span
+            className={`
+              absolute top-1 w-4 h-4 rounded-full bg-white transition-transform
+              ${notificationSettings.enabled && isGranted ? 'left-7' : 'left-1'}
+            `}
+          />
+        </button>
       </div>
-    </Card>
+
+      {notificationSettings.enabled && isGranted && (
+        <>
+          <div className="flex items-center justify-between pt-4 border-t border-dark-border">
+            <div>
+              <p className="text-white">Advance Notice</p>
+              <p className="text-sm text-gray-400">How many days before to notify</p>
+            </div>
+            <select
+              value={notificationSettings.daysBefore}
+              onChange={(e) => updateNotificationSettings({ ...notificationSettings, daysBefore: Number(e.target.value) })}
+              className="px-3 py-1.5 bg-dark-card border border-dark-border rounded-lg text-white"
+            >
+              <option value={1}>1 day</option>
+              <option value={2}>2 days</option>
+              <option value={3}>3 days</option>
+            </select>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-white">Notify on Due Date</p>
+              <p className="text-sm text-gray-400">Remind me when payment is due today</p>
+            </div>
+            <button
+              onClick={() => updateNotificationSettings({ ...notificationSettings, notifyOnDueDate: !notificationSettings.notifyOnDueDate })}
+              className={`relative w-12 h-6 rounded-full transition-colors ${notificationSettings.notifyOnDueDate ? 'bg-blue-600' : 'bg-dark-border'}`}
+            >
+              <span className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${notificationSettings.notifyOnDueDate ? 'left-7' : 'left-1'}`} />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-white">Notify When Overdue</p>
+              <p className="text-sm text-gray-400">Alert me about missed payments</p>
+            </div>
+            <button
+              onClick={() => updateNotificationSettings({ ...notificationSettings, notifyOverdue: !notificationSettings.notifyOverdue })}
+              className={`relative w-12 h-6 rounded-full transition-colors ${notificationSettings.notifyOverdue ? 'bg-blue-600' : 'bg-dark-border'}`}
+            >
+              <span className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${notificationSettings.notifyOverdue ? 'left-7' : 'left-1'}`} />
+            </button>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
-function APIKeyCard() {
+function APIKeysTab() {
   const { showToast } = useToast();
   const geminiApiKey = useBNPLStore((state) => state.geminiApiKey);
   const setGeminiApiKey = useBNPLStore((state) => state.setGeminiApiKey);
@@ -524,7 +462,6 @@ function APIKeyCard() {
   const [inputValue, setInputValue] = useState(geminiApiKey || '');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
 
-  // Sync input when store value changes
   useEffect(() => {
     setInputValue(geminiApiKey || '');
   }, [geminiApiKey]);
@@ -541,67 +478,56 @@ function APIKeyCard() {
   }, [inputValue, geminiApiKey, setGeminiApiKey, showToast]);
 
   return (
-    <Card>
-      <h2 className="text-lg font-semibold text-white mb-4">API Keys</h2>
-      <p className="text-sm text-gray-400 mb-4">
+    <div className="space-y-4">
+      <p className="text-sm text-gray-400">
         Configure API keys for enhanced features.
       </p>
 
-      <div className="space-y-4">
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <label className="text-white">Gemini API Key</label>
-            {saveStatus !== 'idle' && (
-              <span className={`text-xs ${saveStatus === 'saving' ? 'text-gray-400' : 'text-green-400'}`}>
-                {saveStatus === 'saving' ? 'Saving...' : 'Saved'}
-              </span>
-            )}
-          </div>
-          <p className="text-sm text-gray-400 mb-3">
-            Used for screenshot import feature. Get a free key from{' '}
-            <a
-              href="https://aistudio.google.com/apikey"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-400 hover:text-blue-300 underline"
-            >
-              Google AI Studio
-            </a>
-          </p>
-          <div className="flex gap-2">
-            <input
-              type={showKey ? 'text' : 'password'}
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onBlur={handleSave}
-              onKeyDown={(e) => e.key === 'Enter' && handleSave()}
-              placeholder="AIzaSy..."
-              className="flex-1 px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <Button
-              variant="secondary"
-              onClick={() => setShowKey(!showKey)}
-            >
-              {showKey ? 'Hide' : 'Show'}
-            </Button>
-            <Button onClick={handleSave}>
-              Save
-            </Button>
-          </div>
-          {geminiApiKey && (
-            <p className="text-xs text-green-400 mt-2">
-              API key configured
-            </p>
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <label className="text-white">Gemini API Key</label>
+          {saveStatus !== 'idle' && (
+            <span className={`text-xs ${saveStatus === 'saving' ? 'text-gray-400' : 'text-green-400'}`}>
+              {saveStatus === 'saving' ? 'Saving...' : 'Saved'}
+            </span>
           )}
         </div>
+        <p className="text-sm text-gray-400 mb-3">
+          Used for screenshot import feature. Get a free key from{' '}
+          <a
+            href="https://aistudio.google.com/apikey"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-400 hover:text-blue-300 underline"
+          >
+            Google AI Studio
+          </a>
+        </p>
+        <div className="flex gap-2">
+          <input
+            type={showKey ? 'text' : 'password'}
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onBlur={handleSave}
+            onKeyDown={(e) => e.key === 'Enter' && handleSave()}
+            placeholder="AIzaSy..."
+            className="flex-1 px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <Button variant="secondary" onClick={() => setShowKey(!showKey)}>
+            {showKey ? 'Hide' : 'Show'}
+          </Button>
+          <Button onClick={handleSave}>Save</Button>
+        </div>
+        {geminiApiKey && (
+          <p className="text-xs text-green-400 mt-2">API key configured</p>
+        )}
       </div>
-    </Card>
+    </div>
   );
 }
 
-export function SettingsPage() {
+function DataTab() {
   const { showToast } = useToast();
-  const platforms = useBNPLStore((state) => state.platforms);
   const exportData = useBNPLStore((state) => state.exportData);
   const importData = useBNPLStore((state) => state.importData);
   const clearAllData = useBNPLStore((state) => state.clearAllData);
@@ -614,9 +540,7 @@ export function SettingsPage() {
 
   const handleExport = async () => {
     const data = await exportData();
-    const blob = new Blob([JSON.stringify(data, null, 2)], {
-      type: 'application/json',
-    });
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -634,22 +558,21 @@ export function SettingsPage() {
       const text = await file.text();
       const data = JSON.parse(text) as ExportedData;
 
-      // Basic validation
-      if (!data.version || !data.orders || !data.payments) {
+      if (!data.version || !Array.isArray(data.orders) || !Array.isArray(data.payments)) {
         throw new Error('Invalid file format');
       }
 
-      // Store pending data and show confirmation
+      // Ensure platforms and subscriptions arrays exist
+      data.platforms = data.platforms || [];
+      data.subscriptions = data.subscriptions || [];
+
       setPendingImportData(data);
       setShowImportConfirm(true);
       setImportError(null);
     } catch (error) {
-      setImportError(
-        error instanceof Error ? error.message : 'Failed to read file'
-      );
+      setImportError(error instanceof Error ? error.message : 'Failed to read file');
     }
 
-    // Reset input
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -663,19 +586,12 @@ export function SettingsPage() {
       showToast(`Imported ${pendingImportData.orders.length} orders`, 'success');
       setImportError(null);
     } catch (error) {
-      setImportError(
-        error instanceof Error ? error.message : 'Failed to import data'
-      );
+      setImportError(error instanceof Error ? error.message : 'Failed to import data');
       showToast('Import failed', 'error');
     } finally {
       setPendingImportData(null);
       setShowImportConfirm(false);
     }
-  };
-
-  const handleCancelImport = () => {
-    setPendingImportData(null);
-    setShowImportConfirm(false);
   };
 
   const handleClearAll = async () => {
@@ -685,143 +601,62 @@ export function SettingsPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-white">Settings</h1>
-        <p className="text-gray-400 mt-1">Configure your BNPL tracking preferences</p>
-      </div>
-
-      {/* Credit Limits & Schedules */}
-      <Card>
-        <h2 className="text-lg font-semibold text-white mb-4">
-          Platform Settings
-        </h2>
-        <p className="text-sm text-gray-400 mb-4">
-          Configure credit limits and default payment schedules for each platform.
-        </p>
-        {platforms.map((platform) => (
-          <PlatformSettings key={platform.id} platformId={platform.id} />
-        ))}
-      </Card>
-
-      {/* Subscriptions */}
-      <Card>
-        <h2 className="text-lg font-semibold text-white mb-4">
-          Subscriptions
-        </h2>
-        <p className="text-sm text-gray-400 mb-4">
-          Track subscription costs and benefits for each platform.
-        </p>
-        {platforms.map((platform) => (
-          <SubscriptionSettings key={platform.id} platformId={platform.id} />
-        ))}
-      </Card>
-
-      {/* Notifications */}
-      <NotificationSettingsCard />
-
-      {/* API Keys */}
-      <APIKeyCard />
-
-      {/* Data Management */}
-      <Card>
-        <h2 className="text-lg font-semibold text-white mb-4">
-          Data Management
-        </h2>
-        <div className="space-y-4">
-          {/* Export */}
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-white">Export Data</p>
-              <p className="text-sm text-gray-400">
-                Download all your data as a JSON file
-              </p>
-            </div>
-            <Button onClick={handleExport}>Export</Button>
+    <>
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-white">Export Data</p>
+            <p className="text-sm text-gray-400">Download all your data as a JSON file</p>
           </div>
+          <Button onClick={handleExport}>Export</Button>
+        </div>
 
-          {/* Import */}
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-white">Import Data</p>
-              <p className="text-sm text-gray-400">
-                Restore data from a previously exported file
-              </p>
-              {importError && (
-                <p className="text-sm text-red-400 mt-1">{importError}</p>
-              )}
-            </div>
-            <div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".json"
-                onChange={handleFileSelect}
-                className="hidden"
-              />
-              <Button
-                variant="secondary"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                Import
-              </Button>
-            </div>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-white">Import Data</p>
+            <p className="text-sm text-gray-400">Restore data from a previously exported file</p>
+            {importError && <p className="text-sm text-red-400 mt-1">{importError}</p>}
           </div>
-
-          {/* Clear */}
-          <div className="flex items-center justify-between pt-4 border-t border-dark-border">
-            <div>
-              <p className="text-white">Clear All Data</p>
-              <p className="text-sm text-gray-400">
-                Delete all orders and payments. This cannot be undone.
-              </p>
-            </div>
-            <Button variant="danger" onClick={() => setShowClearConfirm(true)}>
-              Clear All
+          <div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json"
+              onChange={handleFileSelect}
+              className="hidden"
+            />
+            <Button variant="secondary" onClick={() => fileInputRef.current?.click()}>
+              Import
             </Button>
           </div>
         </div>
-      </Card>
 
-      {/* Clear Confirmation Modal */}
-      <Modal
-        isOpen={showClearConfirm}
-        onClose={() => setShowClearConfirm(false)}
-        title="Clear All Data"
-        size="sm"
-      >
+        <div className="flex items-center justify-between pt-4 border-t border-dark-border">
+          <div>
+            <p className="text-red-400 font-medium">Danger Zone</p>
+            <p className="text-sm text-gray-400">Delete all orders and payments. This cannot be undone.</p>
+          </div>
+          <Button variant="danger" onClick={() => setShowClearConfirm(true)}>
+            Clear All Data
+          </Button>
+        </div>
+      </div>
+
+      <Modal isOpen={showClearConfirm} onClose={() => setShowClearConfirm(false)} title="Clear All Data" size="sm">
         <div className="space-y-4">
-          <p className="text-gray-300">
-            Are you sure you want to delete all your data? This action cannot be
-            undone.
-          </p>
+          <p className="text-gray-300">Are you sure you want to delete all your data? This action cannot be undone.</p>
           <div className="flex justify-end gap-3">
-            <Button
-              variant="secondary"
-              onClick={() => setShowClearConfirm(false)}
-            >
-              Cancel
-            </Button>
-            <Button variant="danger" onClick={handleClearAll}>
-              Delete All Data
-            </Button>
+            <Button variant="secondary" onClick={() => setShowClearConfirm(false)}>Cancel</Button>
+            <Button variant="danger" onClick={handleClearAll}>Delete All Data</Button>
           </div>
         </div>
       </Modal>
 
-      {/* Import Confirmation Modal */}
-      <Modal
-        isOpen={showImportConfirm}
-        onClose={handleCancelImport}
-        title="Import Data"
-        size="sm"
-      >
+      <Modal isOpen={showImportConfirm} onClose={() => { setPendingImportData(null); setShowImportConfirm(false); }} title="Import Data" size="sm">
         <div className="space-y-4">
           <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
             <p className="text-amber-400 text-sm font-medium">Warning</p>
-            <p className="text-gray-300 text-sm mt-1">
-              Importing will replace all existing data. This cannot be undone.
-            </p>
+            <p className="text-gray-300 text-sm mt-1">Importing will replace all existing data. This cannot be undone.</p>
           </div>
           {pendingImportData && (
             <div className="text-sm text-gray-400">
@@ -833,15 +668,88 @@ export function SettingsPage() {
             </div>
           )}
           <div className="flex justify-end gap-3">
-            <Button variant="secondary" onClick={handleCancelImport}>
-              Cancel
-            </Button>
-            <Button onClick={handleConfirmImport}>
-              Import Data
-            </Button>
+            <Button variant="secondary" onClick={() => { setPendingImportData(null); setShowImportConfirm(false); }}>Cancel</Button>
+            <Button onClick={handleConfirmImport}>Import Data</Button>
           </div>
         </div>
       </Modal>
+    </>
+  );
+}
+
+export function SettingsPage() {
+  const [activeTab, setActiveTab] = useState<SettingsTab>('platforms');
+  const platforms = useBNPLStore((state) => state.platforms);
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-white">Settings</h1>
+        <p className="text-gray-400 mt-1">Configure your BNPL tracking preferences</p>
+      </div>
+
+      {/* Tab Navigation */}
+      <div className="flex gap-1 p-1 bg-dark-card rounded-lg border border-dark-border">
+        {TABS.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`
+              flex-1 px-4 py-2 text-sm font-medium rounded-md transition-colors
+              ${activeTab === tab.id
+                ? 'bg-dark-hover text-white'
+                : 'text-gray-400 hover:text-white'
+              }
+            `}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab Content */}
+      <Card>
+        {activeTab === 'platforms' && (
+          <>
+            <h2 className="text-lg font-semibold text-white mb-2">Platform Settings</h2>
+            <p className="text-sm text-gray-400 mb-4">Configure credit limits and default payment schedules.</p>
+            {platforms.map((platform) => (
+              <PlatformSettings key={platform.id} platformId={platform.id} />
+            ))}
+          </>
+        )}
+
+        {activeTab === 'subscriptions' && (
+          <>
+            <h2 className="text-lg font-semibold text-white mb-2">Subscriptions</h2>
+            <p className="text-sm text-gray-400 mb-4">Track subscription costs and benefits for each platform.</p>
+            {platforms.map((platform) => (
+              <SubscriptionSettings key={platform.id} platformId={platform.id} />
+            ))}
+          </>
+        )}
+
+        {activeTab === 'notifications' && (
+          <>
+            <h2 className="text-lg font-semibold text-white mb-2">Notifications</h2>
+            <NotificationsTab />
+          </>
+        )}
+
+        {activeTab === 'api-keys' && (
+          <>
+            <h2 className="text-lg font-semibold text-white mb-2">API Keys</h2>
+            <APIKeysTab />
+          </>
+        )}
+
+        {activeTab === 'data' && (
+          <>
+            <h2 className="text-lg font-semibold text-white mb-2">Data Management</h2>
+            <DataTab />
+          </>
+        )}
+      </Card>
     </div>
   );
 }

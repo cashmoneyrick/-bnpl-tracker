@@ -1,5 +1,6 @@
 import { Card } from '../shared/Card';
 import { ProgressBar } from '../shared/ProgressBar';
+import { PlatformIcon } from '../shared/PlatformIcon';
 import { useBNPLStore } from '../../store';
 import { useAllPlatformUtilizations } from '../../store/selectors';
 import { formatCurrency } from '../../utils/currency';
@@ -27,9 +28,10 @@ export function PlatformUtilization() {
             <div key={platform.id}>
               <div className="flex items-center justify-between mb-1.5">
                 <div className="flex items-center gap-2">
-                  <span
-                    className="w-3 h-3 rounded-full"
-                    style={{ backgroundColor: platform.color }}
+                  <PlatformIcon
+                    platformId={platform.id}
+                    size="sm"
+                    style={{ color: platform.color }}
                   />
                   <span className="text-sm font-medium text-white">
                     {platform.name}

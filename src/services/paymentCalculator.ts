@@ -1,5 +1,5 @@
-import { addDays } from 'date-fns';
-import type { CalculatedPayment } from '../types';
+import { addDays, format, parseISO, differenceInDays } from 'date-fns';
+import type { CalculatedPayment, Payment } from '../types';
 
 interface PaymentCalculationInput {
   totalAmount: number; // in cents
@@ -155,4 +155,105 @@ export function estimateInterest(
   const monthlyPayment = calculateAmortizedPayment(principal, apr, installments, intervalDays);
   const totalPayments = monthlyPayment * installments;
   return totalPayments - principal;
+}
+
+/**
+ * Shift all payment due dates by a delta (in days)
+ * Used when the first payment date changes
+ */
+export function shiftPaymentDates(
+  payments: Payment[],
+  deltaDays: number
+): Payment[] {
+  if (deltaDays === 0) return payments;
+
+  return payments.map((p) => ({
+    ...p,
+    dueDate: format(addDays(parseISO(p.dueDate), deltaDays), 'yyyy-MM-dd'),
+  }));
+}
+
+/**
+ * Recalculate payment dates based on new interval
+ * Keeps first payment date as anchor, recalculates subsequent dates
+ */
+export function recalculatePaymentDates(
+  payments: Payment[],
+  firstPaymentDate: string,
+  intervalDays: number
+): Payment[] {
+  const sorted = [...payments].sort((a, b) => a.installmentNumber - b.installmentNumber);
+  const baseDate = parseISO(firstPaymentDate);
+
+  return sorted.map((p, index) => ({
+    ...p,
+    dueDate: format(addDays(baseDate, index * intervalDays), 'yyyy-MM-dd'),
+  }));
+}
+
+/**
+ * Redistribute total amount across payments, respecting manual overrides
+ *
+ * - Payments with isManualOverride=true keep their amounts
+ * - Remaining amount is distributed evenly across non-manual payments
+ * - First non-manual payment gets any remainder cents
+ */
+export function redistributePaymentAmounts(
+  payments: Payment[],
+  newTotal: number
+): { payments: Payment[]; error?: string } {
+  const manualPayments = payments.filter((p) => p.isManualOverride);
+  const autoPayments = payments.filter((p) => !p.isManualOverride);
+
+  const manualTotal = manualPayments.reduce((sum, p) => sum + p.amount, 0);
+
+  // Check if manual payments exceed new total
+  if (manualTotal > newTotal) {
+    return {
+      payments,
+      error: 'Manual override payments exceed new total amount',
+    };
+  }
+
+  // If all payments are manual and don't match total, error
+  if (autoPayments.length === 0 && manualTotal !== newTotal) {
+    return {
+      payments,
+      error: 'All payments have manual overrides - cannot redistribute',
+    };
+  }
+
+  // If all payments are manual and match total, no changes needed
+  if (autoPayments.length === 0) {
+    return { payments };
+  }
+
+  // Calculate amount to distribute to auto payments
+  const remaining = newTotal - manualTotal;
+  const baseAmount = Math.floor(remaining / autoPayments.length);
+  const remainder = remaining - baseAmount * autoPayments.length;
+
+  // Sort auto payments by installment number for consistent remainder assignment
+  const sortedAuto = [...autoPayments].sort(
+    (a, b) => a.installmentNumber - b.installmentNumber
+  );
+
+  return {
+    payments: payments.map((p) => {
+      if (p.isManualOverride) return p;
+
+      const autoIndex = sortedAuto.findIndex((ap) => ap.id === p.id);
+      // First auto payment gets remainder
+      const amount = autoIndex === 0 ? baseAmount + remainder : baseAmount;
+
+      return { ...p, amount };
+    }),
+  };
+}
+
+/**
+ * Calculate the difference in days between two date strings
+ */
+export function getDateDelta(oldDate: string, newDate: string): number {
+  return differenceInDays(parseISO(newDate), parseISO(oldDate));
 }

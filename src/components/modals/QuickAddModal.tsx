@@ -38,13 +38,32 @@ export function QuickAddModal() {
   const [customInstallments, setCustomInstallments] = useState(0);
   const [aprInput, setAprInput] = useState('0');
 
+  // Payment frequency (0 means use platform default)
+  const [intervalDays, setIntervalDays] = useState(0);
+  const [showCustomInterval, setShowCustomInterval] = useState(false);
+
+  // Frequency options
+  const FREQUENCY_OPTIONS = [
+    { label: 'Platform Default', days: 0 },
+    { label: 'Weekly', days: 7 },
+    { label: 'Bi-weekly', days: 14 },
+    { label: 'Monthly', days: 30 },
+    { label: 'Custom', days: -1 },
+  ];
+
   // Tags
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+
+  // Notes
+  const [notes, setNotes] = useState('');
 
   // Manual overrides - tracks which payments have been manually edited
   const [overrides, setOverrides] = useState<
     Record<number, { amount?: number; dueDate?: string }>
   >({});
+
+  // Advanced options toggle
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // JSON input state
   const [showJsonInput, setShowJsonInput] = useState(false);
@@ -70,6 +89,7 @@ export function QuickAddModal() {
   const PLATFORM_ALIASES = ['platform', 'provider', 'app', 'bnpl', 'service'];
   const STORE_ALIASES = ['store', 'merchant', 'retailer', 'vendor', 'shop', 'seller'];
   const TOTAL_ALIASES = ['total', 'totalamount', 'total_amount', 'amount', 'ordertotal', 'order_total', 'price'];
+  const INTERVAL_ALIASES = ['interval', 'intervaldays', 'interval_days', 'frequency', 'daysbetween', 'days_between'];
   const PAYMENT_AMOUNT_ALIASES = ['amount', 'payment', 'due', 'price'];
   const PAYMENT_DATE_ALIASES = ['date', 'duedate', 'due_date'];
   const PAYMENT_STATUS_ALIASES = ['status', 'state'];
@@ -115,13 +135,32 @@ export function QuickAddModal() {
       return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
     }
 
-    // Try parsing with Date (handles "Jan 23, 2026", "23 Jan 2026", etc.)
-    const parsed = new Date(str);
-    if (!isNaN(parsed.getTime())) {
-      const y = parsed.getFullYear();
-      const m = String(parsed.getMonth() + 1).padStart(2, '0');
-      const d = String(parsed.getDate()).padStart(2, '0');
-      return `${y}-${m}-${d}`;
+    // YYYY/MM/DD
+    const slashMatch2 = str.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+    if (slashMatch2) {
+      const [, y, m, d] = slashMatch2;
+      return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+    }
+
+    // "Month Day, Year" format (e.g., "Jan 23, 2026", "January 23, 2026")
+    const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+    const monthDayYear = str.match(/^([a-zA-Z]+)\s+(\d{1,2}),?\s*(\d{4})$/);
+    if (monthDayYear) {
+      const [, monthStr, day, year] = monthDayYear;
+      const monthIndex = monthNames.findIndex(m => monthStr.toLowerCase().startsWith(m));
+      if (monthIndex !== -1) {
+        return `${year}-${String(monthIndex + 1).padStart(2, '0')}-${day.padStart(2, '0')}`;
+      }
+    }
+
+    // "Day Month Year" format (e.g., "23 Jan 2026")
+    const dayMonthYear = str.match(/^(\d{1,2})\s+([a-zA-Z]+)\s+(\d{4})$/);
+    if (dayMonthYear) {
+      const [, day, monthStr, year] = dayMonthYear;
+      const monthIndex = monthNames.findIndex(m => monthStr.toLowerCase().startsWith(m));
+      if (monthIndex !== -1) {
+        return `${year}-${String(monthIndex + 1).padStart(2, '0')}-${day.padStart(2, '0')}`;
+      }
     }
 
     return null;
@@ -172,6 +211,7 @@ export function QuickAddModal() {
     platform: PlatformId;
     store?: string;
     total: number;
+    intervalDays?: number;
     payments: Array<{ amount: number; date: string; status: 'paid' | 'pending'; paidDate?: string }>;
   } => {
     let data: unknown;
@@ -210,6 +250,16 @@ export function QuickAddModal() {
     // Find store (optional)
     const rawStore = findField(obj, STORE_ALIASES);
     const store = typeof rawStore === 'string' ? rawStore : undefined;
+
+    // Find intervalDays (optional)
+    const rawInterval = findField(obj, INTERVAL_ALIASES);
+    let intervalDays: number | undefined;
+    if (rawInterval !== undefined) {
+      const interval = typeof rawInterval === 'number' ? rawInterval : parseInt(String(rawInterval));
+      if (!isNaN(interval) && interval > 0 && interval <= 365) {
+        intervalDays = interval;
+      }
+    }
 
     // Find and validate payments array
     const paymentsArray = findPaymentsArray(obj);
@@ -266,6 +316,7 @@ export function QuickAddModal() {
       platform: normalizedPlatform as PlatformId,
       store,
       total,
+      intervalDays,
       payments,
     };
   };
@@ -291,6 +342,7 @@ export function QuickAddModal() {
     }
 
     const installments = customInstallments || platform.defaultInstallments;
+    const actualIntervalDays = intervalDays > 0 ? intervalDays : platform.defaultIntervalDays;
     const apr =
       platformId === 'affirm' ? parseFloat(aprInput) / 100 || 0 : undefined;
 
@@ -299,7 +351,7 @@ export function QuickAddModal() {
         totalAmount: amountInCents,
         firstPaymentDate: parseISO(firstPaymentDate),
         installments,
-        intervalDays: platform.defaultIntervalDays,
+        intervalDays: actualIntervalDays,
         apr,
       });
       return result.payments;
@@ -312,6 +364,7 @@ export function QuickAddModal() {
     platform,
     platformId,
     customInstallments,
+    intervalDays,
     aprInput,
   ]);
 
@@ -391,8 +444,12 @@ export function QuickAddModal() {
       setFirstPaymentDate(formatDateInput(new Date()));
       setCustomInstallments(0);
       setAprInput('0');
+      setIntervalDays(0);
+      setShowCustomInterval(false);
       setSelectedTags([]);
+      setNotes('');
       setOverrides({});
+      setShowAdvanced(false);
       setShowJsonInput(false);
       setJsonInput('');
       setJsonError(null);
@@ -448,6 +505,15 @@ export function QuickAddModal() {
       setAmountInput(parsed.total.toFixed(2));
       setFirstPaymentDate(parsed.payments[0].date);
       setCustomInstallments(parsed.payments.length);
+
+      // Set interval days if provided
+      if (parsed.intervalDays) {
+        setIntervalDays(parsed.intervalDays);
+        setShowCustomInterval(true);
+      } else {
+        setIntervalDays(0);
+        setShowCustomInterval(false);
+      }
 
       // Build overrides from payments
       const newOverrides: Record<number, { amount?: number; dueDate?: string }> = {};
@@ -545,6 +611,8 @@ export function QuickAddModal() {
         totalAmount: amountInCents,
         firstPaymentDate,
         tags: selectedTags.length > 0 ? selectedTags : undefined,
+        notes: notes.trim() || undefined,
+        intervalDays: intervalDays > 0 ? intervalDays : undefined,
         customInstallments: customInstallments || undefined,
         apr:
           platformId === 'affirm' && parseFloat(aprInput) > 0
@@ -657,6 +725,20 @@ export function QuickAddModal() {
           </div>
         </div>
 
+        {/* Notes */}
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-1.5">
+            Notes (optional)
+          </label>
+          <input
+            type="text"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="e.g., Birthday gift for mom, Split with roommate"
+            className="w-full px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+
         {/* Amount */}
         <Input
           label="Total Amount"
@@ -676,6 +758,69 @@ export function QuickAddModal() {
           value={firstPaymentDate}
           onChange={(e) => setFirstPaymentDate(e.target.value)}
         />
+
+        {/* Payment Frequency */}
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-2">
+            Payment Frequency
+          </label>
+          <div className="flex flex-wrap gap-2">
+            {FREQUENCY_OPTIONS.map((opt) => {
+              const isSelected =
+                opt.days === -1
+                  ? showCustomInterval
+                  : opt.days === intervalDays && !showCustomInterval;
+              return (
+                <button
+                  key={opt.label}
+                  type="button"
+                  onClick={() => {
+                    if (opt.days === -1) {
+                      setShowCustomInterval(true);
+                      setIntervalDays(platform?.defaultIntervalDays || 14);
+                    } else {
+                      setShowCustomInterval(false);
+                      setIntervalDays(opt.days);
+                    }
+                    setOverrides({}); // Clear overrides when frequency changes
+                  }}
+                  className={`
+                    px-3 py-1.5 rounded-lg text-sm font-medium transition-colors
+                    ${
+                      isSelected
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-dark-hover text-gray-400 hover:text-white'
+                    }
+                  `}
+                >
+                  {opt.label}
+                  {opt.days === 0 && platform && (
+                    <span className="ml-1 text-xs opacity-70">
+                      ({platform.defaultIntervalDays}d)
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          {showCustomInterval && (
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                type="number"
+                value={intervalDays}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value) || 1;
+                  setIntervalDays(Math.max(1, Math.min(365, val)));
+                  setOverrides({});
+                }}
+                className="w-20 px-3 py-1.5 bg-dark-card border border-dark-border rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                min={1}
+                max={365}
+              />
+              <span className="text-sm text-gray-400">days between payments</span>
+            </div>
+          )}
+        </div>
 
         {/* Affirm-specific fields */}
         {platformId === 'affirm' && (
@@ -715,69 +860,98 @@ export function QuickAddModal() {
           onChange={handleScreenshotSelect}
         />
 
-        {/* Paste JSON / Import Screenshot Links */}
-        {!showJsonInput && (
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setShowJsonInput(true)}
-              className="text-sm text-blue-400 hover:text-blue-300 underline"
-            >
-              Paste JSON
-            </button>
-            <span className="text-gray-600">|</span>
-            <button
-              type="button"
-              onClick={() => {
-                if (!geminiApiKey) {
-                  showToast('Please add your Gemini API key in Settings first', 'error');
-                  return;
-                }
-                screenshotInputRef.current?.click();
-              }}
-              disabled={isExtracting}
-              className="text-sm text-blue-400 hover:text-blue-300 underline disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isExtracting ? 'Extracting...' : 'Import from Screenshot'}
-            </button>
-          </div>
-        )}
+        {/* Advanced Options Toggle */}
+        <button
+          type="button"
+          onClick={() => setShowAdvanced(!showAdvanced)}
+          className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-300 transition-colors"
+        >
+          <svg
+            className={`w-4 h-4 transition-transform ${showAdvanced ? 'rotate-90' : ''}`}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+          Advanced Options
+          <span className="text-xs text-gray-500">(import, edit payments)</span>
+        </button>
 
-        {/* JSON Input Section */}
-        {showJsonInput && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="block text-sm font-medium text-gray-300">
-                Paste Order JSON
-              </label>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowJsonInput(false);
-                  setJsonInput('');
-                  setJsonError(null);
-                }}
-                className="text-sm text-gray-400 hover:text-gray-300"
-              >
-                Cancel
-              </button>
-            </div>
-            <textarea
-              value={jsonInput}
-              onChange={(e) => setJsonInput(e.target.value)}
-              placeholder='{"platform": "klarna", "total": 85.00, "payments": [...]}'
-              className="w-full h-32 px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-white text-sm font-mono resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            {jsonError && (
-              <p className="text-sm text-red-400">{jsonError}</p>
+        {/* Advanced Options Content */}
+        {showAdvanced && (
+          <div className="space-y-4 pl-4 border-l-2 border-dark-border">
+            {/* Import Options */}
+            {!showJsonInput && (
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowJsonInput(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-dark-hover text-gray-300 hover:text-white rounded-lg transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  Paste JSON
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!geminiApiKey) {
+                      showToast('Please add your Gemini API key in Settings first', 'error');
+                      return;
+                    }
+                    screenshotInputRef.current?.click();
+                  }}
+                  disabled={isExtracting}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-dark-hover text-gray-300 hover:text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  {isExtracting ? 'Extracting...' : 'Import Screenshot'}
+                </button>
+              </div>
             )}
-            <Button
-              type="button"
-              onClick={handleApplyJson}
-              disabled={!jsonInput.trim()}
-            >
-              Apply JSON
-            </Button>
+
+            {/* JSON Input Section */}
+            {showJsonInput && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="block text-sm font-medium text-gray-300">
+                    Paste Order JSON
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowJsonInput(false);
+                      setJsonInput('');
+                      setJsonError(null);
+                    }}
+                    className="text-sm text-gray-400 hover:text-gray-300"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                <textarea
+                  value={jsonInput}
+                  onChange={(e) => setJsonInput(e.target.value)}
+                  placeholder='{"platform": "klarna", "total": 85.00, "payments": [...]}'
+                  className="w-full h-32 px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-white text-sm font-mono resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                {jsonError && (
+                  <p className="text-sm text-red-400">{jsonError}</p>
+                )}
+                <Button
+                  type="button"
+                  onClick={handleApplyJson}
+                  disabled={!jsonInput.trim()}
+                >
+                  Apply JSON
+                </Button>
+              </div>
+            )}
           </div>
         )}
 

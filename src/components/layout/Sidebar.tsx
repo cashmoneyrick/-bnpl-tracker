@@ -1,7 +1,15 @@
 import { NavLink } from 'react-router-dom';
 import { useBNPLStore } from '../../store';
+import { useOverduePayments } from '../../store/selectors';
 
-const navItems = [
+interface NavItem {
+  to: string;
+  label: string;
+  icon: React.ReactNode;
+  badge?: 'overdue';
+}
+
+const navItems: NavItem[] = [
   {
     to: '/',
     label: 'Dashboard',
@@ -12,6 +20,21 @@ const navItems = [
           strokeLinejoin="round"
           strokeWidth={2}
           d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"
+        />
+      </svg>
+    ),
+    badge: 'overdue',
+  },
+  {
+    to: '/orders',
+    label: 'Orders',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"
         />
       </svg>
     ),
@@ -82,19 +105,52 @@ const navItems = [
 
 export function Sidebar() {
   const openQuickAddModal = useBNPLStore((state) => state.openQuickAddModal);
+  const collapsed = useBNPLStore((state) => state.sidebarCollapsed);
+  const toggleSidebar = useBNPLStore((state) => state.toggleSidebar);
+  const overduePayments = useOverduePayments();
+  const overdueCount = overduePayments.length;
 
   return (
-    <aside className="w-64 min-h-screen bg-dark-card border-r border-dark-border flex flex-col">
-      {/* Logo */}
-      <div className="p-6">
-        <h1 className="text-xl font-bold text-white">BNPL Tracker</h1>
+    <aside
+      className={`
+        min-h-screen bg-dark-card border-r border-dark-border flex flex-col transition-all duration-200
+        ${collapsed ? 'w-16' : 'w-64'}
+      `}
+    >
+      {/* Logo & Collapse Toggle */}
+      <div className={`p-4 flex items-center ${collapsed ? 'justify-center' : 'justify-between'}`}>
+        {!collapsed && <h1 className="text-xl font-bold text-white">BNPL Tracker</h1>}
+        <button
+          onClick={toggleSidebar}
+          className="p-1.5 rounded-lg text-gray-400 hover:bg-dark-hover hover:text-white transition-colors"
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          <svg
+            className={`w-5 h-5 transition-transform ${collapsed ? 'rotate-180' : ''}`}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M11 19l-7-7 7-7m8 14l-7-7 7-7"
+            />
+          </svg>
+        </button>
       </div>
 
       {/* Quick Add Button */}
-      <div className="px-4 mb-4">
+      <div className={`px-2 mb-4 ${collapsed ? 'px-2' : 'px-4'}`}>
         <button
           onClick={openQuickAddModal}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+          className={`
+            flex items-center justify-center gap-2 bg-blue-600 text-white rounded-lg
+            hover:bg-blue-700 transition-colors font-medium
+            ${collapsed ? 'w-10 h-10 p-0 mx-auto' : 'w-full px-4 py-2.5'}
+          `}
+          title={collapsed ? 'Quick Add (⌘N)' : undefined}
         >
           <svg
             className="w-5 h-5"
@@ -109,40 +165,62 @@ export function Sidebar() {
               d="M12 4v16m8-8H4"
             />
           </svg>
-          Quick Add
+          {!collapsed && 'Quick Add'}
         </button>
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 px-4 space-y-1">
-        {navItems.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
-                isActive
-                  ? 'bg-dark-hover text-white'
-                  : 'text-gray-400 hover:bg-dark-hover hover:text-white'
-              }`
-            }
-          >
-            {item.icon}
-            <span>{item.label}</span>
-          </NavLink>
-        ))}
+      <nav className={`flex-1 space-y-1 ${collapsed ? 'px-2' : 'px-4'}`}>
+        {navItems.map((item) => {
+          const showBadge = item.badge === 'overdue' && overdueCount > 0;
+          return (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              title={collapsed ? item.label : undefined}
+              className={({ isActive }) =>
+                `flex items-center gap-3 rounded-lg transition-colors ${
+                  collapsed ? 'justify-center p-2.5' : 'px-3 py-2.5'
+                } ${
+                  isActive
+                    ? 'bg-dark-hover text-white'
+                    : 'text-gray-400 hover:bg-dark-hover hover:text-white'
+                }`
+              }
+            >
+              <span className="relative">
+                {item.icon}
+                {showBadge && collapsed && (
+                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full" />
+                )}
+              </span>
+              {!collapsed && (
+                <>
+                  <span className="flex-1">{item.label}</span>
+                  {showBadge && (
+                    <span className="flex items-center justify-center min-w-[20px] h-5 px-1.5 text-xs font-medium bg-red-500 text-white rounded-full">
+                      {overdueCount}
+                    </span>
+                  )}
+                </>
+              )}
+            </NavLink>
+          );
+        })}
       </nav>
 
       {/* Footer */}
-      <div className="p-4 border-t border-dark-border">
-        <p className="text-xs text-gray-500 text-center">
-          Press{' '}
-          <kbd className="px-1.5 py-0.5 bg-dark-hover rounded text-gray-400">
-            ⌘N
-          </kbd>{' '}
-          to add order
-        </p>
-      </div>
+      {!collapsed && (
+        <div className="p-4 border-t border-dark-border">
+          <p className="text-xs text-gray-500 text-center">
+            Press{' '}
+            <kbd className="px-1.5 py-0.5 bg-dark-hover rounded text-gray-400">
+              ⌘N
+            </kbd>{' '}
+            to add order
+          </p>
+        </div>
+      )}
     </aside>
   );
 }

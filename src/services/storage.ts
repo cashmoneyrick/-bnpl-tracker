@@ -389,6 +389,10 @@ class StorageService {
       throw new Error(`Unsupported data version: ${data.version}`);
     }
 
+    // Clear the localStorage backup FIRST to prevent recursive restore loop
+    // (clearAllData -> initializeDefaults -> importData from backup -> loop)
+    localStorage.removeItem(BACKUP_KEY);
+
     // Clear existing data
     await this.clearAllData();
 

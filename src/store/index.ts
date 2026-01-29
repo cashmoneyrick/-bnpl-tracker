@@ -11,7 +11,13 @@ import type {
   NotificationSettings,
 } from '../types';
 import { storage } from '../services/storage';
-import { calculatePayments } from '../services/paymentCalculator';
+import {
+  calculatePayments,
+  shiftPaymentDates,
+  recalculatePaymentDates,
+  redistributePaymentAmounts,
+  getDateDelta,
+} from '../services/paymentCalculator';
 import { parseISO, isBefore, startOfDay } from 'date-fns';
 
 interface BNPLStore {
@@ -24,11 +30,13 @@ interface BNPLStore {
   geminiApiKey: string | null;
   isLoading: boolean;
   isInitialized: boolean;
+  isInitializing: boolean; // Lock to prevent race conditions
 
   // UI State
   quickAddModalOpen: boolean;
   orderDetailModalOpen: boolean;
   selectedOrderId: string | null;
+  sidebarCollapsed: boolean;
 
   // Actions
   initialize: () => Promise<void>;
@@ -38,6 +46,8 @@ interface BNPLStore {
   markPaymentPaid: (paymentId: string, customPaidDate?: string) => Promise<void>;
   markPaymentUnpaid: (paymentId: string) => Promise<void>;
   updatePayment: (id: string, updates: Partial<Payment>) => Promise<void>;
+  deletePayment: (paymentId: string) => Promise<void>;
+  addPaymentToOrder: (orderId: string, amount: number, dueDate: string) => Promise<Payment>;
   updatePlatformLimit: (platformId: PlatformId, limit: number) => Promise<void>;
   updatePlatformSchedule: (
     platformId: PlatformId,
@@ -54,6 +64,7 @@ interface BNPLStore {
   closeQuickAddModal: () => void;
   openOrderDetailModal: (orderId: string) => void;
   closeOrderDetailModal: () => void;
+  toggleSidebar: () => void;
 
   // Data Operations
   exportData: () => Promise<ExportedData>;
@@ -76,17 +87,22 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
   geminiApiKey: null,
   isLoading: false,
   isInitialized: false,
+  isInitializing: false,
 
   // UI State
   quickAddModalOpen: false,
   orderDetailModalOpen: false,
   selectedOrderId: null,
+  sidebarCollapsed: localStorage.getItem('sidebarCollapsed') === 'true',
 
   // Initialize store from IndexedDB
   initialize: async () => {
-    if (get().isInitialized) return;
+    // Prevent race conditions - check both flags synchronously
+    const { isInitialized, isInitializing } = get();
+    if (isInitialized || isInitializing) return;
 
-    set({ isLoading: true });
+    // Set lock immediately (synchronous) before any async work
+    set({ isLoading: true, isInitializing: true });
 
     try {
       await storage.init();
@@ -97,6 +113,13 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
         storage.getAllPlatforms(),
         storage.getAllSubscriptions(),
       ]);
+
+      console.log('[Store] Initialized with:', {
+        orders: orders.length,
+        payments: payments.length,
+        platforms: platforms.length,
+        subscriptions: subscriptions.length,
+      });
 
       const notificationSettings = storage.getNotificationSettings();
       const geminiApiKey = storage.getGeminiApiKey();
@@ -110,13 +133,14 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
         geminiApiKey,
         isLoading: false,
         isInitialized: true,
+        isInitializing: false,
       });
 
       // Update overdue statuses
       await get().updateOverduePayments();
     } catch (error) {
       console.error('Failed to initialize store:', error);
-      set({ isLoading: false });
+      set({ isLoading: false, isInitializing: false });
     }
   },
 
@@ -129,10 +153,10 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
       throw new Error(`Platform not found: ${input.platformId}`);
     }
 
-    // Determine installments and interval
+    // Determine installments and interval (per-order override or platform default)
     const installments =
       input.customInstallments ?? platform.defaultInstallments;
-    const intervalDays = platform.defaultIntervalDays;
+    const intervalDays = input.intervalDays ?? platform.defaultIntervalDays;
 
     // Calculate payments
     const { payments: calculatedPayments } = calculatePayments({
@@ -153,6 +177,8 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
       status: 'active',
       createdAt: new Date().toISOString(),
       tags: input.tags,
+      notes: input.notes,
+      intervalDays: input.intervalDays, // Store per-order interval if provided
       customInstallments: input.customInstallments,
       apr: input.apr,
     };
@@ -210,21 +236,98 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
     return { order, payments: paymentRecords };
   },
 
-  // Update an existing order
+  // Update an existing order with smart recalculation
   updateOrder: async (id: string, updates: Partial<Order>) => {
-    const { orders } = get();
-    const orderIndex = orders.findIndex((o) => o.id === id);
+    const { orders, payments } = get();
+    const currentOrder = orders.find((o) => o.id === id);
 
-    if (orderIndex === -1) {
+    if (!currentOrder) {
       throw new Error(`Order not found: ${id}`);
     }
 
-    const updatedOrder = { ...orders[orderIndex], ...updates };
+    const orderPayments = payments
+      .filter((p) => p.orderId === id)
+      .sort((a, b) => a.installmentNumber - b.installmentNumber);
+
+    let updatedPayments = [...orderPayments];
+
+    // 1. Handle intervalDays change - recalculate all payment dates
+    if (
+      updates.intervalDays !== undefined &&
+      updates.intervalDays !== currentOrder.intervalDays
+    ) {
+      const firstDate =
+        updates.firstPaymentDate || currentOrder.firstPaymentDate;
+      updatedPayments = recalculatePaymentDates(
+        updatedPayments,
+        firstDate,
+        updates.intervalDays
+      );
+    }
+
+    // 2. Handle firstPaymentDate change - shift all dates by delta
+    // (Only if intervalDays didn't change, since that already recalculates dates)
+    if (
+      updates.firstPaymentDate !== undefined &&
+      updates.firstPaymentDate !== currentOrder.firstPaymentDate &&
+      updates.intervalDays === undefined
+    ) {
+      const deltaDays = getDateDelta(
+        currentOrder.firstPaymentDate,
+        updates.firstPaymentDate
+      );
+      updatedPayments = shiftPaymentDates(updatedPayments, deltaDays);
+    }
+
+    // 3. Handle totalAmount change - redistribute amounts respecting manual overrides
+    if (
+      updates.totalAmount !== undefined &&
+      updates.totalAmount !== currentOrder.totalAmount
+    ) {
+      const { payments: redistributed, error } = redistributePaymentAmounts(
+        updatedPayments,
+        updates.totalAmount
+      );
+      if (error) {
+        throw new Error(error);
+      }
+      updatedPayments = redistributed;
+    }
+
+    // Save updated order
+    const updatedOrder = { ...currentOrder, ...updates };
     await storage.saveOrder(updatedOrder);
 
+    // Save updated payments (only those that changed)
+    const changedPayments: Payment[] = [];
+    for (const payment of updatedPayments) {
+      const original = orderPayments.find((p) => p.id === payment.id);
+      if (
+        original &&
+        (original.amount !== payment.amount ||
+          original.dueDate !== payment.dueDate)
+      ) {
+        await storage.savePayment(payment);
+        changedPayments.push(payment);
+      }
+    }
+
+    // Update state atomically
     set((state) => ({
       orders: state.orders.map((o) => (o.id === id ? updatedOrder : o)),
+      payments: state.payments.map((p) => {
+        const updated = updatedPayments.find((up) => up.id === p.id);
+        return updated || p;
+      }),
     }));
+
+    // Check for overdue payments after date changes
+    if (
+      updates.firstPaymentDate !== undefined ||
+      updates.intervalDays !== undefined
+    ) {
+      await get().updateOverduePayments();
+    }
   },
 
   // Delete an order and its payments
@@ -350,6 +453,60 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
     }));
   },
 
+  // Delete a payment
+  deletePayment: async (paymentId: string) => {
+    await storage.deletePayment(paymentId);
+
+    set((state) => ({
+      payments: state.payments.filter((p) => p.id !== paymentId),
+    }));
+  },
+
+  // Add a payment to an existing order
+  addPaymentToOrder: async (orderId: string, amount: number, dueDate: string) => {
+    const { orders, payments } = get();
+    const order = orders.find((o) => o.id === orderId);
+
+    if (!order) {
+      throw new Error(`Order not found: ${orderId}`);
+    }
+
+    // Find the highest installment number for this order
+    const orderPayments = payments.filter((p) => p.orderId === orderId);
+    const maxInstallment = orderPayments.reduce(
+      (max, p) => Math.max(max, p.installmentNumber),
+      0
+    );
+
+    const newPayment: Payment = {
+      id: uuidv4(),
+      orderId,
+      platformId: order.platformId,
+      amount,
+      dueDate,
+      installmentNumber: maxInstallment + 1,
+      status: 'pending',
+      isManualOverride: true,
+    };
+
+    await storage.savePayment(newPayment);
+
+    // Update order total
+    const newTotal = order.totalAmount + amount;
+    const updatedOrder = { ...order, totalAmount: newTotal };
+    await storage.saveOrder(updatedOrder);
+
+    set((state) => ({
+      payments: [...state.payments, newPayment],
+      orders: state.orders.map((o) => (o.id === orderId ? updatedOrder : o)),
+    }));
+
+    // Check for overdue
+    await get().updateOverduePayments();
+
+    return newPayment;
+  },
+
   // Update platform credit limit
   updatePlatformLimit: async (platformId: PlatformId, limit: number) => {
     const { platforms } = get();
@@ -467,6 +624,11 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
     set({ orderDetailModalOpen: true, selectedOrderId: orderId }),
   closeOrderDetailModal: () =>
     set({ orderDetailModalOpen: false, selectedOrderId: null }),
+  toggleSidebar: () => {
+    const newState = !get().sidebarCollapsed;
+    localStorage.setItem('sidebarCollapsed', String(newState));
+    set({ sidebarCollapsed: newState });
+  },
 
   // Export all data
   exportData: async () => {
@@ -475,6 +637,11 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
 
   // Import data
   importData: async (data: ExportedData) => {
+    console.log('[Store] Importing data:', {
+      orders: data.orders.length,
+      payments: data.payments.length,
+    });
+
     await storage.importData(data);
 
     // Reload state
@@ -484,6 +651,11 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
       storage.getAllPlatforms(),
       storage.getAllSubscriptions(),
     ]);
+
+    console.log('[Store] After import, loaded:', {
+      orders: orders.length,
+      payments: payments.length,
+    });
 
     set({
       orders,

@@ -1,16 +1,19 @@
 import { useState } from 'react';
 import { Card } from '../shared/Card';
 import { Button } from '../shared/Button';
+import { PlatformIcon } from '../shared/PlatformIcon';
 import { useToast } from '../shared/Toast';
 import { useBNPLStore } from '../../store';
 import { useOverduePayments, useOrder } from '../../store/selectors';
 import { formatCurrency } from '../../utils/currency';
-import { getRelativeDateDescription } from '../../utils/date';
+import { useLiveTime, formatRelativeTime } from '../../hooks/useRelativeTime';
 
 function OverdueItem({
   payment,
+  now,
 }: {
   payment: ReturnType<typeof useOverduePayments>[0];
+  now: Date;
 }) {
   const { showToast } = useToast();
   const order = useOrder(payment.orderId);
@@ -19,17 +22,19 @@ function OverdueItem({
   const platforms = useBNPLStore((state) => state.platforms);
 
   const [isMarking, setIsMarking] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
 
   const platform = platforms.find((p) => p.id === payment.platformId);
-  const overdueText = getRelativeDateDescription(payment.dueDate);
+  const relativeTime = formatRelativeTime(payment.dueDate, now);
 
   const handleMarkPaid = async (e: React.MouseEvent) => {
     e.stopPropagation();
     setIsMarking(true);
     try {
       await markPaymentPaid(payment.id);
+      setShowSuccess(true);
       showToast('Payment marked as paid', 'success');
-    } catch (error) {
+    } catch {
       showToast('Failed to mark payment', 'error');
     } finally {
       setIsMarking(false);
@@ -43,12 +48,13 @@ function OverdueItem({
   return (
     <div
       onClick={handleRowClick}
-      className="flex items-center justify-between p-3 rounded-lg bg-red-500/10 border border-red-500/30 cursor-pointer hover:bg-red-500/20 transition-colors"
+      className="flex items-center justify-between p-3 rounded-lg bg-red-500/10 border border-red-500/30 cursor-pointer hover:bg-red-500/20 transition-colors animate-subtle-pulse"
     >
       <div className="flex items-center gap-3">
-        <span
-          className="w-2.5 h-2.5 rounded-full"
-          style={{ backgroundColor: platform?.color || '#666' }}
+        <PlatformIcon
+          platformId={payment.platformId}
+          size="sm"
+          style={{ color: platform?.color || '#666' }}
         />
         <div>
           <div className="flex items-center gap-2">
@@ -62,12 +68,20 @@ function OverdueItem({
             {order?.storeName && (
               <span className="text-gray-400">{order.storeName} · </span>
             )}
-            <span className="text-red-400 font-medium">{overdueText}</span>
+            <span className="text-red-400 font-medium">
+              {relativeTime.text}
+            </span>
           </div>
         </div>
       </div>
-      <Button variant="danger" size="sm" onClick={handleMarkPaid} disabled={isMarking}>
-        {isMarking ? 'Marking...' : 'Mark Paid'}
+      <Button variant="danger" size="sm" onClick={handleMarkPaid} disabled={isMarking || showSuccess}>
+        {showSuccess ? (
+          <span className="animate-success-bounce">Paid!</span>
+        ) : isMarking ? (
+          'Marking...'
+        ) : (
+          'Mark Paid'
+        )}
       </Button>
     </div>
   );
@@ -75,6 +89,8 @@ function OverdueItem({
 
 export function OverdueAlerts() {
   const overduePayments = useOverduePayments();
+  // Update every minute to keep times fresh
+  const now = useLiveTime(60000);
 
   if (overduePayments.length === 0) {
     return null;
@@ -113,7 +129,7 @@ export function OverdueAlerts() {
 
       <div className="space-y-2">
         {overduePayments.map((payment) => (
-          <OverdueItem key={payment.id} payment={payment} />
+          <OverdueItem key={payment.id} payment={payment} now={now} />
         ))}
       </div>
     </Card>

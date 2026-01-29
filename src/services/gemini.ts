@@ -153,6 +153,7 @@ function validateExtractedOrder(data: unknown): GeminiExtractedOrder {
 /**
  * Normalize date to YYYY-MM-DD format
  * Handles various formats from Gemini: "Feb 10, 2026", "2/10/2026", "2026-02-10", etc.
+ * Avoids timezone issues by parsing explicitly without using Date constructor for text formats.
  */
 function normalizeDate(value: string): string {
   const str = value.trim();
@@ -169,29 +170,67 @@ function normalizeDate(value: string): string {
     return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
   }
 
-  // Try parsing with Date constructor
-  let parsed = new Date(str);
+  // YYYY/MM/DD format
+  const slashMatch2 = str.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+  if (slashMatch2) {
+    const [, y, m, d] = slashMatch2;
+    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+  }
 
-  // If year is far in the past (before 2020), it's likely a parsing error
-  // Default to current year
-  if (parsed.getFullYear() < 2020) {
-    const currentYear = new Date().getFullYear();
-    // Try adding current year
-    parsed = new Date(`${str} ${currentYear}`);
-    if (isNaN(parsed.getTime())) {
-      // If that fails, try prepending year
-      parsed = new Date(`${currentYear} ${str}`);
+  // Month name patterns - parse explicitly to avoid timezone issues
+  const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  const currentYear = new Date().getFullYear();
+
+  // "Month Day, Year" format (e.g., "Feb 10, 2026", "February 10, 2026")
+  const monthDayYear = str.match(/^([a-zA-Z]+)\s+(\d{1,2}),?\s*(\d{4})$/);
+  if (monthDayYear) {
+    const [, monthStr, day, year] = monthDayYear;
+    const monthIndex = monthNames.findIndex(m => monthStr.toLowerCase().startsWith(m));
+    if (monthIndex !== -1) {
+      return `${year}-${String(monthIndex + 1).padStart(2, '0')}-${day.padStart(2, '0')}`;
     }
   }
 
-  if (isNaN(parsed.getTime())) {
-    throw new Error(`Invalid date: ${str}`);
+  // "Month Day" format without year (e.g., "Feb 10") - assume current/next year
+  const monthDay = str.match(/^([a-zA-Z]+)\s+(\d{1,2})$/);
+  if (monthDay) {
+    const [, monthStr, day] = monthDay;
+    const monthIndex = monthNames.findIndex(m => monthStr.toLowerCase().startsWith(m));
+    if (monthIndex !== -1) {
+      // If the date would be more than 30 days in the past, use next year
+      const testDate = new Date(currentYear, monthIndex, parseInt(day));
+      const now = new Date();
+      const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      const year = testDate < thirtyDaysAgo ? currentYear + 1 : currentYear;
+      return `${year}-${String(monthIndex + 1).padStart(2, '0')}-${day.padStart(2, '0')}`;
+    }
   }
 
-  const y = parsed.getFullYear();
-  const m = String(parsed.getMonth() + 1).padStart(2, '0');
-  const d = String(parsed.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+  // "Day Month Year" format (e.g., "10 Feb 2026")
+  const dayMonthYear = str.match(/^(\d{1,2})\s+([a-zA-Z]+)\s+(\d{4})$/);
+  if (dayMonthYear) {
+    const [, day, monthStr, year] = dayMonthYear;
+    const monthIndex = monthNames.findIndex(m => monthStr.toLowerCase().startsWith(m));
+    if (monthIndex !== -1) {
+      return `${year}-${String(monthIndex + 1).padStart(2, '0')}-${day.padStart(2, '0')}`;
+    }
+  }
+
+  // "Day Month" format without year (e.g., "10 Feb")
+  const dayMonth = str.match(/^(\d{1,2})\s+([a-zA-Z]+)$/);
+  if (dayMonth) {
+    const [, day, monthStr] = dayMonth;
+    const monthIndex = monthNames.findIndex(m => monthStr.toLowerCase().startsWith(m));
+    if (monthIndex !== -1) {
+      const testDate = new Date(currentYear, monthIndex, parseInt(day));
+      const now = new Date();
+      const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      const year = testDate < thirtyDaysAgo ? currentYear + 1 : currentYear;
+      return `${year}-${String(monthIndex + 1).padStart(2, '0')}-${day.padStart(2, '0')}`;
+    }
+  }
+
+  throw new Error(`Invalid date: ${str}`);
 }
 
 async function fileToBase64(file: File): Promise<string> {

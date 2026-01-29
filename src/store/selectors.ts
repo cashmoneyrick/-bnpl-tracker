@@ -160,6 +160,51 @@ export function useMonthlyOutgoing(): number {
 }
 
 /**
+ * Get monthly payment stats (total, paid, percentage)
+ */
+export function useMonthlyPaymentStats(): { total: number; paid: number; pending: number; percentage: number } {
+  const payments = useBNPLStore((state) => state.payments);
+
+  return useMemo(() => {
+    const now = new Date();
+    const monthStart = startOfMonth(now);
+    const monthEnd = endOfMonth(now);
+
+    const monthPayments = payments.filter((p) => {
+      const dueDate = parseISO(p.dueDate);
+      return isWithinInterval(dueDate, { start: monthStart, end: monthEnd });
+    });
+
+    const total = monthPayments.reduce((sum, p) => sum + p.amount, 0);
+    const paid = monthPayments
+      .filter((p) => p.status === 'paid')
+      .reduce((sum, p) => sum + p.amount, 0);
+    const pending = total - paid;
+    const percentage = total > 0 ? (paid / total) * 100 : 0;
+
+    return { total, paid, pending, percentage };
+  }, [payments]);
+}
+
+/**
+ * Get overall credit utilization
+ */
+export function useOverallCreditUtilization(): { used: number; limit: number; percentage: number } {
+  const platforms = useBNPLStore((state) => state.platforms);
+  const payments = useBNPLStore((state) => state.payments);
+
+  return useMemo(() => {
+    const limit = platforms.reduce((sum, p) => sum + p.creditLimit, 0);
+    const used = payments
+      .filter((p) => p.status !== 'paid')
+      .reduce((sum, p) => sum + p.amount, 0);
+    const percentage = limit > 0 ? (used / limit) * 100 : 0;
+
+    return { used, limit, percentage };
+  }, [platforms, payments]);
+}
+
+/**
  * Get payments for a specific date
  */
 export function usePaymentsForDate(date: Date): Payment[] {
@@ -389,6 +434,31 @@ export function useOrderPayments(orderId: string): Payment[] {
 }
 
 /**
+ * Order payment progress
+ */
+export interface OrderProgress {
+  total: number;
+  paid: number;
+  percentage: number;
+}
+
+/**
+ * Get payment progress for an order
+ */
+export function useOrderProgress(orderId: string): OrderProgress {
+  const payments = useBNPLStore((state) => state.payments);
+
+  return useMemo(() => {
+    const orderPayments = payments.filter((p) => p.orderId === orderId);
+    const total = orderPayments.length;
+    const paid = orderPayments.filter((p) => p.status === 'paid').length;
+    const percentage = total > 0 ? (paid / total) * 100 : 0;
+
+    return { total, paid, percentage };
+  }, [payments, orderId]);
+}
+
+/**
  * Get platform by ID
  */
 export function usePlatform(platformId: PlatformId): Platform | undefined {
@@ -479,4 +549,70 @@ export function useMonthComparison(): MonthComparison {
       },
     };
   }, [orders]);
+}
+
+/**
+ * Get orders filtered by platform
+ */
+export function useOrdersByPlatform(platformId: PlatformId): Order[] {
+  const orders = useBNPLStore((state) => state.orders);
+
+  return useMemo(
+    () => orders.filter((o) => o.platformId === platformId),
+    [orders, platformId]
+  );
+}
+
+/**
+ * Get upcoming payments for a specific platform
+ */
+export function useUpcomingPaymentsByPlatform(
+  platformId: PlatformId,
+  days: number = 30
+): Payment[] {
+  const upcomingPayments = useUpcomingPayments(days);
+
+  return useMemo(
+    () => upcomingPayments.filter((p) => p.platformId === platformId),
+    [upcomingPayments, platformId]
+  );
+}
+
+/**
+ * Get most common store for a platform
+ */
+export function useMostCommonStore(platformId: PlatformId): string | null {
+  const orders = useBNPLStore((state) => state.orders);
+
+  return useMemo(() => {
+    const platformOrders = orders.filter(
+      (o) => o.platformId === platformId && o.storeName
+    );
+    if (platformOrders.length === 0) return null;
+
+    const storeCounts: Record<string, number> = {};
+    for (const order of platformOrders) {
+      if (order.storeName) {
+        storeCounts[order.storeName] = (storeCounts[order.storeName] || 0) + 1;
+      }
+    }
+
+    const sorted = Object.entries(storeCounts).sort((a, b) => b[1] - a[1]);
+    return sorted[0]?.[0] || null;
+  }, [orders, platformId]);
+}
+
+/**
+ * Get next unpaid payment for an order
+ */
+export function useNextPayment(orderId: string): Payment | null {
+  const payments = useBNPLStore((state) => state.payments);
+
+  return useMemo(() => {
+    const orderPayments = payments
+      .filter((p) => p.orderId === orderId && p.status !== 'paid')
+      .sort((a, b) => parseISO(a.dueDate).getTime() - parseISO(b.dueDate).getTime());
+
+    return orderPayments[0] || null;
+  }, [payments, orderId]);
 }
