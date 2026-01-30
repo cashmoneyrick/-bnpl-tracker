@@ -6,8 +6,6 @@ import { QuickAddModal } from './components/modals/QuickAddModal';
 import { OrderDetailModal } from './components/modals/OrderDetailModal';
 import { HomePage } from './pages/HomePage';
 import { DashboardPage } from './pages/DashboardPage';
-import { CalendarPage } from './pages/CalendarPage';
-import { OrdersPage } from './pages/OrdersPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { SettingsPage } from './pages/SettingsPage';
@@ -22,8 +20,6 @@ function App() {
               <Routes>
                 <Route path="/" element={<HomePage />} />
                 <Route path="/budgeting" element={<DashboardPage />} />
-                <Route path="/budgeting/orders" element={<OrdersPage />} />
-                <Route path="/budgeting/calendar" element={<CalendarPage />} />
                 <Route path="/budgeting/analytics" element={<AnalyticsPage />} />
                 <Route path="/budgeting/history" element={<HistoryPage />} />
                 <Route path="/settings" element={<SettingsPage />} />

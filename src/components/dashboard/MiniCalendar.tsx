@@ -124,8 +124,8 @@ export function MiniCalendar() {
               className={`
                 min-h-[48px] p-1 rounded text-left transition-colors
                 ${!isCurrentMonth ? 'opacity-40' : ''}
-                ${isSelected ? 'bg-blue-500/20 ring-1 ring-blue-500' : 'hover:bg-dark-hover'}
-                ${today && !isSelected ? 'ring-1 ring-blue-500/50' : ''}
+                ${today ? 'bg-blue-500/20' : ''}
+                ${isSelected ? 'ring-1 ring-blue-500' : today ? '' : 'hover:bg-dark-hover'}
               `}
             >
               <div

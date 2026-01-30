@@ -1,6 +1,7 @@
 import { SummaryCards } from '../components/dashboard/SummaryCards';
 import { OverdueAlerts } from '../components/dashboard/OverdueAlerts';
 import { InsightStrip } from '../components/dashboard/InsightStrip';
+import { OrdersSection } from '../components/dashboard/OrdersSection';
 
 export function DashboardPage() {
   return (
@@ -18,6 +19,9 @@ export function DashboardPage() {
 
       {/* Subtle insight at bottom */}
       <InsightStrip />
+
+      {/* Orders Section */}
+      <OrdersSection />
     </div>
   );
 }
