@@ -455,11 +455,36 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
 
   // Delete a payment
   deletePayment: async (paymentId: string) => {
+    const { payments, orders } = get();
+
+    // Find the payment to get its amount and orderId
+    const payment = payments.find((p) => p.id === paymentId);
+    if (!payment) {
+      throw new Error(`Payment not found: ${paymentId}`);
+    }
+
+    // Find the associated order
+    const order = orders.find((o) => o.id === payment.orderId);
+
+    // Delete the payment from storage
     await storage.deletePayment(paymentId);
 
-    set((state) => ({
-      payments: state.payments.filter((p) => p.id !== paymentId),
-    }));
+    // If order exists, reduce its total amount
+    if (order) {
+      const newTotal = Math.max(0, order.totalAmount - payment.amount);
+      const updatedOrder = { ...order, totalAmount: newTotal };
+      await storage.saveOrder(updatedOrder);
+
+      set((state) => ({
+        payments: state.payments.filter((p) => p.id !== paymentId),
+        orders: state.orders.map((o) => (o.id === order.id ? updatedOrder : o)),
+      }));
+    } else {
+      // Order not found, just remove payment from state
+      set((state) => ({
+        payments: state.payments.filter((p) => p.id !== paymentId),
+      }));
+    }
   },
 
   // Add a payment to an existing order

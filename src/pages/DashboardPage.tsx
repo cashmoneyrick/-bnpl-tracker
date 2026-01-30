@@ -1,5 +1,4 @@
 import { SummaryCards } from '../components/dashboard/SummaryCards';
-import { UpcomingPayments } from '../components/dashboard/UpcomingPayments';
 import { OverdueAlerts } from '../components/dashboard/OverdueAlerts';
 import { InsightStrip } from '../components/dashboard/InsightStrip';
 
@@ -16,9 +15,6 @@ export function DashboardPage() {
 
       {/* Summary Cards */}
       <SummaryCards />
-
-      {/* Upcoming Payments - full width, most important section */}
-      <UpcomingPayments />
 
       {/* Subtle insight at bottom */}
       <InsightStrip />

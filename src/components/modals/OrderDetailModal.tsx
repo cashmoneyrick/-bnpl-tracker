@@ -8,7 +8,7 @@ import { useOrder, useOrderPayments, usePlatform } from '../../store/selectors';
 import { formatCurrency, parseDollarInput, formatNumberInput } from '../../utils/currency';
 import { formatDateInput } from '../../utils/date';
 import { format, parseISO } from 'date-fns';
-import { ORDER_TAG_OPTIONS, type PlatformId } from '../../types';
+import { ORDER_TAG_OPTIONS, type PlatformId, type Order } from '../../types';
 
 export function OrderDetailModal() {
   const { showToast } = useToast();
@@ -37,6 +37,16 @@ export function OrderDetailModal() {
   const [editFirstPaymentDate, setEditFirstPaymentDate] = useState('');
   const [editIntervalDays, setEditIntervalDays] = useState(0);
   const [showCustomIntervalEdit, setShowCustomIntervalEdit] = useState(false);
+  const [editCreatedAt, setEditCreatedAt] = useState('');
+  const [editStatus, setEditStatus] = useState<Order['status']>('active');
+
+  // Status options for editing
+  const STATUS_OPTIONS: { value: Order['status']; label: string }[] = [
+    { value: 'active', label: 'Active' },
+    { value: 'completed', label: 'Completed' },
+    { value: 'cancelled', label: 'Cancelled' },
+    { value: 'refunded', label: 'Refunded' },
+  ];
 
   // Frequency options for editing
   const FREQUENCY_OPTIONS = [
@@ -116,6 +126,8 @@ export function OrderDetailModal() {
     // Show custom interval if it's set and doesn't match presets
     const isPreset = [0, 7, 14, 30].includes(currentInterval);
     setShowCustomIntervalEdit(currentInterval > 0 && !isPreset);
+    setEditCreatedAt(order.createdAt.split('T')[0]);
+    setEditStatus(order.status);
     setEditingOrderInfo(true);
   };
 
@@ -159,6 +171,14 @@ export function OrderDetailModal() {
       const newInterval = editIntervalDays > 0 ? editIntervalDays : undefined;
       if ((newInterval || 0) !== currentInterval) {
         updates.intervalDays = newInterval;
+      }
+      // Handle created date change
+      if (editCreatedAt !== order.createdAt.split('T')[0]) {
+        updates.createdAt = editCreatedAt + 'T00:00:00.000Z';
+      }
+      // Handle status change
+      if (editStatus !== order.status) {
+        updates.status = editStatus;
       }
 
       if (Object.keys(updates).length > 0) {
@@ -518,23 +538,50 @@ export function OrderDetailModal() {
           </div>
           <div>
             <p className="text-xs text-gray-500 uppercase tracking-wider">Created</p>
-            <p className="text-lg font-semibold text-white mt-1">
-              {formatDate(order.createdAt)}
-            </p>
+            {editingOrderInfo ? (
+              <input
+                type="date"
+                value={editCreatedAt}
+                onChange={(e) => setEditCreatedAt(e.target.value)}
+                className="mt-1 w-full px-2 py-1 bg-dark-card border border-dark-border rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            ) : (
+              <p className="text-lg font-semibold text-white mt-1">
+                {formatDate(order.createdAt)}
+              </p>
+            )}
           </div>
           <div>
             <p className="text-xs text-gray-500 uppercase tracking-wider">Status</p>
-            <p className="mt-1">
-              <span
-                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                  order.status === 'completed'
-                    ? 'bg-green-500/10 text-green-400'
-                    : 'bg-blue-500/10 text-blue-400'
-                }`}
+            {editingOrderInfo ? (
+              <select
+                value={editStatus}
+                onChange={(e) => setEditStatus(e.target.value as Order['status'])}
+                className="mt-1 w-full px-2 py-1 bg-dark-card border border-dark-border rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                {order.status === 'completed' ? 'Completed' : 'Active'}
-              </span>
-            </p>
+                {STATUS_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <p className="mt-1">
+                <span
+                  className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                    order.status === 'completed'
+                      ? 'bg-green-500/10 text-green-400'
+                      : order.status === 'cancelled'
+                      ? 'bg-gray-500/10 text-gray-400'
+                      : order.status === 'refunded'
+                      ? 'bg-purple-500/10 text-purple-400'
+                      : 'bg-blue-500/10 text-blue-400'
+                  }`}
+                >
+                  {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                </span>
+              </p>
+            )}
           </div>
         </div>
 

@@ -10,7 +10,7 @@ export interface Order {
   storeName?: string;
   totalAmount: number; // in cents
   firstPaymentDate: string; // ISO date
-  status: 'active' | 'completed';
+  status: 'active' | 'completed' | 'cancelled' | 'refunded';
   createdAt: string; // ISO timestamp
   tags?: string[]; // e.g., ['groceries', 'electronics']
   notes?: string; // User notes, e.g., "Birthday gift for mom"
