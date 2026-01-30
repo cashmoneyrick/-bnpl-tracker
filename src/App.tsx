@@ -9,6 +9,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { CanvasPage } from './pages/CanvasPage';
 
 function App() {
   return (
@@ -23,6 +24,7 @@ function App() {
                 <Route path="/budgeting/analytics" element={<AnalyticsPage />} />
                 <Route path="/budgeting/history" element={<HistoryPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/canvas" element={<CanvasPage />} />
               </Routes>
             </Layout>
           </ErrorBoundary>

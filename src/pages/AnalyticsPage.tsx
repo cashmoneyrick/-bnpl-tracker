@@ -1,336 +1,468 @@
-import { useState, useMemo } from 'react';
+import { useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   PieChart,
   Pie,
   Cell,
   ResponsiveContainer,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
   Tooltip,
-  CartesianGrid,
 } from 'recharts';
-import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval, subMonths } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { Card } from '../components/shared/Card';
 import { Button } from '../components/shared/Button';
 import { useBNPLStore } from '../store';
-import { useAllPlatformStats, useMostUsedPlatform, useMonthComparison } from '../store/selectors';
-import { formatCurrency, centsToDollars } from '../utils/currency';
-import type { DateRangeOption } from '../types';
+import {
+  useOnTimeRate,
+  useOnTimeStreak,
+  useWeeklyDeployment,
+  useAllPlatformGoals,
+  useTotalLimitGrowth,
+  useArbitrageStats,
+  useArbitrageOrders,
+  useOrdersByType,
+  useTotalAvailableCredit,
+} from '../store/selectors';
+import { formatCurrency } from '../utils/currency';
 
-const DATE_RANGE_OPTIONS: { value: DateRangeOption; label: string }[] = [
-  { value: 'this-month', label: 'This Month' },
-  { value: 'last-3-months', label: 'Last 3 Months' },
-  { value: 'last-6-months', label: 'Last 6 Months' },
-  { value: 'all-time', label: 'All Time' },
-];
+const ORDER_TYPE_COLORS: Record<string, string> = {
+  personal: '#3b82f6',    // blue
+  necessity: '#22c55e',   // green
+  arbitrage: '#f59e0b',   // amber
+};
 
 export function AnalyticsPage() {
-  const [dateRange, setDateRange] = useState<DateRangeOption>('all-time');
+  const navigate = useNavigate();
   const platforms = useBNPLStore((state) => state.platforms);
-  const orders = useBNPLStore((state) => state.orders);
-  const platformStats = useAllPlatformStats(dateRange);
-  const mostUsedPlatform = useMostUsedPlatform();
+  const limitHistory = useBNPLStore((state) => state.limitHistory);
 
-  // Pie chart data
-  const pieData = useMemo(() => {
-    return platformStats
-      .filter((s) => s.totalSpent > 0)
-      .map((stat) => {
-        const platform = platforms.find((p) => p.id === stat.platformId);
-        return {
-          name: platform?.name || stat.platformId,
-          value: stat.totalSpent,
-          color: platform?.color || '#666',
-        };
+  // Trust metrics
+  const onTimeRate = useOnTimeRate();
+  const onTimeStreak = useOnTimeStreak();
+
+  // Credit metrics
+  const weeklyDeployment = useWeeklyDeployment();
+  const totalAvailable = useTotalAvailableCredit();
+
+  // Platform goals
+  const platformGoals = useAllPlatformGoals();
+
+  // Limit growth
+  const limitGrowth = useTotalLimitGrowth();
+
+  // Arbitrage
+  const arbitrageStats = useArbitrageStats();
+  const arbitrageOrders = useArbitrageOrders();
+  const hasArbitrageOrders = arbitrageOrders.length > 0;
+
+  // Order breakdown
+  const ordersByType = useOrdersByType();
+
+  // Pie chart data for order type breakdown
+  const orderTypePieData = useMemo(() => {
+    const data = [];
+    if (ordersByType.personal.count > 0) {
+      data.push({
+        name: 'Personal',
+        value: ordersByType.personal.total,
+        color: ORDER_TYPE_COLORS.personal,
       });
-  }, [platformStats, platforms]);
-
-  // Monthly trend data
-  const trendData = useMemo(() => {
-    const now = new Date();
-    const monthsBack = dateRange === 'this-month' ? 0 : dateRange === 'last-3-months' ? 2 : dateRange === 'last-6-months' ? 5 : 11;
-    const startDate = startOfMonth(subMonths(now, monthsBack));
-    const months = eachMonthOfInterval({ start: startDate, end: now });
-
-    return months.map((month) => {
-      const monthStart = startOfMonth(month);
-      const monthEnd = endOfMonth(month);
-
-      const monthOrders = orders.filter((o) => {
-        const createdAt = parseISO(o.createdAt);
-        return createdAt >= monthStart && createdAt <= monthEnd;
+    }
+    if (ordersByType.necessity.count > 0) {
+      data.push({
+        name: 'Necessity',
+        value: ordersByType.necessity.total,
+        color: ORDER_TYPE_COLORS.necessity,
       });
+    }
+    if (ordersByType.arbitrage.count > 0) {
+      data.push({
+        name: 'Arbitrage',
+        value: ordersByType.arbitrage.total,
+        color: ORDER_TYPE_COLORS.arbitrage,
+      });
+    }
+    return data;
+  }, [ordersByType]);
 
-      const total = monthOrders.reduce((sum, o) => sum + o.totalAmount, 0);
+  // Get trust status message
+  const getTrustStatus = () => {
+    if (onTimeRate >= 100) return { message: 'Perfect record', color: 'text-green-400' };
+    if (onTimeRate >= 90) return { message: 'Excellent standing', color: 'text-green-400' };
+    if (onTimeRate >= 75) return { message: 'Good standing', color: 'text-blue-400' };
+    if (onTimeRate >= 50) return { message: 'Needs improvement', color: 'text-amber-400' };
+    return { message: 'Critical - pay on time', color: 'text-red-400' };
+  };
 
-      return {
-        month: format(month, 'MMM'),
-        amount: centsToDollars(total),
-      };
-    });
-  }, [orders, dateRange]);
+  const trustStatus = getTrustStatus();
 
-  // Overall stats
-  const overallStats = useMemo(() => {
-    const totalOrders = platformStats.reduce((sum, s) => sum + s.totalOrders, 0);
-    const totalSpent = platformStats.reduce((sum, s) => sum + s.totalSpent, 0);
-    const avgOrderSize = totalOrders > 0 ? totalSpent / totalOrders : 0;
-
-    const allPaidPayments = platformStats.reduce((sum, s) => sum + s.totalPayments, 0);
-    const allOnTimePayments = platformStats.reduce((sum, s) => sum + s.onTimePayments, 0);
-    const onTimeRate = allPaidPayments > 0 ? (allOnTimePayments / allPaidPayments) * 100 : 0;
-
-    return {
-      totalOrders,
-      totalSpent,
-      avgOrderSize,
-      onTimeRate,
-    };
-  }, [platformStats]);
-
-  // Best on-time platform
-  const bestOnTimePlatform = useMemo(() => {
-    const withPayments = platformStats.filter((s) => s.totalPayments > 0);
-    if (withPayments.length === 0) return null;
-
-    return withPayments.reduce((best, current) =>
-      current.onTimePaymentRate > best.onTimePaymentRate ? current : best
-    );
-  }, [platformStats]);
-
-  const monthComparison = useMonthComparison();
-  const mostUsedPlatformData = platforms.find((p) => p.id === mostUsedPlatform);
-  const bestOnTimePlatformData = bestOnTimePlatform
-    ? platforms.find((p) => p.id === bestOnTimePlatform.platformId)
-    : null;
+  // Recent limit changes (last 5)
+  const recentLimitChanges = useMemo(() => {
+    return [...limitHistory]
+      .sort((a, b) => new Date(b.changedAt).getTime() - new Date(a.changedAt).getTime())
+      .slice(0, 5)
+      .map((change) => ({
+        ...change,
+        platform: platforms.find((p) => p.id === change.platformId),
+      }));
+  }, [limitHistory, platforms]);
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Analytics</h1>
-          <p className="text-gray-400 mt-1">Understand your spending patterns</p>
-        </div>
-
-        {/* Date Range Filter */}
-        <div className="flex gap-2">
-          {DATE_RANGE_OPTIONS.map((option) => (
-            <Button
-              key={option.value}
-              variant={dateRange === option.value ? 'primary' : 'secondary'}
-              size="sm"
-              onClick={() => setDateRange(option.value)}
-            >
-              {option.label}
-            </Button>
-          ))}
-        </div>
+      <div>
+        <h1 className="text-2xl font-bold text-white">Capital Strategy</h1>
+        <p className="text-gray-400 mt-1">Track your credit-building progress and deployment</p>
       </div>
 
-      {/* Month-over-Month Comparison */}
-      {(monthComparison.thisMonth.orders > 0 || monthComparison.lastMonth.orders > 0) && (
-        <Card>
-          <h3 className="text-lg font-semibold text-white mb-4">vs Last Month</h3>
-          <div className="grid grid-cols-3 gap-4">
-            {/* Spending */}
-            <div>
-              <p className="text-sm text-gray-400 mb-1">Spending</p>
-              <div className="flex items-center gap-2">
-                <span className="text-xl font-bold text-white">
-                  {formatCurrency(monthComparison.thisMonth.spending)}
-                </span>
-                {monthComparison.changes.spending !== null && (
-                  <span
-                    className={`text-sm font-medium flex items-center gap-0.5 ${
-                      monthComparison.changes.spending < 0
-                        ? 'text-green-400'
-                        : monthComparison.changes.spending > 0
-                        ? 'text-red-400'
-                        : 'text-gray-400'
-                    }`}
+      {/* Section 1: Trust Score */}
+      <Card className="bg-gradient-to-br from-green-500/10 to-transparent">
+        <h3 className="text-lg font-semibold text-white mb-4">Trust Score</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* On-Time Rate */}
+          <div className="text-center md:text-left">
+            <p className="text-4xl font-bold text-white">{Math.round(onTimeRate)}%</p>
+            <p className="text-sm text-gray-400 mt-1">On-Time Payment Rate</p>
+          </div>
+
+          {/* Streak */}
+          <div className="text-center flex flex-col items-center md:items-start">
+            <div className="flex items-center gap-2">
+              <svg
+                className="w-6 h-6 text-amber-400"
+                fill="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path d="M12.9 2.6l2.3 5a1 1 0 00.8.5l5.4.5a1 1 0 01.6 1.7l-4.1 3.5a1 1 0 00-.3 1l1.2 5.3a1 1 0 01-1.5 1.1L12.4 18a1 1 0 00-1 0l-4.8 2.9a1 1 0 01-1.5-1.1l1.2-5.3a1 1 0 00-.3-1L2 10.3a1 1 0 01.6-1.7l5.4-.5a1 1 0 00.8-.5l2.3-5a1 1 0 011.8 0z" />
+              </svg>
+              <p className="text-3xl font-bold text-white">{onTimeStreak}</p>
+            </div>
+            <p className="text-sm text-gray-400 mt-1">Consecutive on-time payments</p>
+          </div>
+
+          {/* Status */}
+          <div className="text-center md:text-right">
+            <p className={`text-xl font-semibold ${trustStatus.color}`}>
+              {trustStatus.message}
+            </p>
+            <p className="text-sm text-gray-400 mt-1">Current Status</p>
+          </div>
+        </div>
+      </Card>
+
+      {/* Section 2: Available Capital */}
+      <Card>
+        <h3 className="text-lg font-semibold text-white mb-4">Available Capital</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Total Available */}
+          <div>
+            <p className="text-3xl font-bold text-white">{formatCurrency(totalAvailable)}</p>
+            <p className="text-sm text-gray-400 mt-1">Total Available Credit</p>
+          </div>
+
+          {/* Weekly Deployment */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm text-gray-400">Weekly Deployment</p>
+              <p className="text-white font-medium">{formatCurrency(weeklyDeployment.amount)}</p>
+            </div>
+            <div className="h-3 bg-dark-card rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${
+                  weeklyDeployment.isOverExtended
+                    ? 'bg-red-500'
+                    : weeklyDeployment.warningThreshold
+                    ? 'bg-amber-500'
+                    : 'bg-green-500'
+                }`}
+                style={{ width: `${Math.min((weeklyDeployment.amount / 60000) * 100, 100)}%` }}
+              />
+            </div>
+            <div className="flex justify-between mt-1">
+              <p className="text-xs text-gray-500">$0</p>
+              <p className="text-xs text-gray-500">$600</p>
+            </div>
+            {weeklyDeployment.isOverExtended && (
+              <p className="text-sm text-red-400 mt-2">
+                Warning: Over $600 deployed this week
+              </p>
+            )}
+            {!weeklyDeployment.isOverExtended && weeklyDeployment.warningThreshold && (
+              <p className="text-sm text-amber-400 mt-2">
+                Approaching weekly limit threshold
+              </p>
+            )}
+          </div>
+        </div>
+      </Card>
+
+      {/* Section 3: Platform Goals */}
+      <Card>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-white">Platform Goals</h3>
+          <Button size="sm" variant="secondary" onClick={() => navigate('/settings')}>
+            Edit Goals
+          </Button>
+        </div>
+
+        {/* Flexible Tier */}
+        {platformGoals.flexible.length > 0 && (
+          <div className="mb-6">
+            <p className="text-sm font-medium text-blue-400 mb-3">Flexible (Virtual Visa)</p>
+            <div className="space-y-3">
+              {platformGoals.flexible.map(({ platform, currentLimit, goalLimit, progress }) => (
+                <div key={platform.id}>
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="w-3 h-3 rounded-full"
+                        style={{ backgroundColor: platform.color }}
+                      />
+                      <span className="text-white text-sm">{platform.name}</span>
+                    </div>
+                    <span className="text-gray-400 text-sm">
+                      {formatCurrency(currentLimit)} / {formatCurrency(goalLimit)}
+                    </span>
+                  </div>
+                  <div className="h-2 bg-dark-card rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all"
+                      style={{
+                        width: `${Math.min(progress, 100)}%`,
+                        backgroundColor: platform.color,
+                      }}
+                    />
+                  </div>
+                  {progress >= 100 && (
+                    <p className="text-xs text-green-400 mt-1">Goal reached!</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Limited Tier */}
+        {platformGoals.limited.length > 0 && (
+          <div>
+            <p className="text-sm font-medium text-amber-400 mb-3">Limited (Merchant-specific)</p>
+            <div className="space-y-3">
+              {platformGoals.limited.map(({ platform, currentLimit, goalLimit, progress }) => (
+                <div key={platform.id}>
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="w-3 h-3 rounded-full"
+                        style={{ backgroundColor: platform.color }}
+                      />
+                      <span className="text-white text-sm">{platform.name}</span>
+                    </div>
+                    <span className="text-gray-400 text-sm">
+                      {formatCurrency(currentLimit)} / {formatCurrency(goalLimit)}
+                    </span>
+                  </div>
+                  <div className="h-2 bg-dark-card rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all"
+                      style={{
+                        width: `${Math.min(progress, 100)}%`,
+                        backgroundColor: platform.color,
+                      }}
+                    />
+                  </div>
+                  {progress >= 100 && (
+                    <p className="text-xs text-green-400 mt-1">Goal reached!</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {platformGoals.flexible.length === 0 && platformGoals.limited.length === 0 && (
+          <p className="text-gray-500 text-sm">
+            No goals set. Set platform goals in Settings to track your progress.
+          </p>
+        )}
+      </Card>
+
+      {/* Section 4: Limit Growth History */}
+      <Card>
+        <h3 className="text-lg font-semibold text-white mb-4">Limit Growth</h3>
+
+        {/* Summary */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 p-4 bg-dark-hover rounded-lg">
+          <div>
+            <p className="text-sm text-gray-400">Starting Total</p>
+            <p className="text-xl font-semibold text-white">
+              {formatCurrency(limitGrowth.startingTotal)}
+            </p>
+          </div>
+          <div>
+            <p className="text-sm text-gray-400">Current Total</p>
+            <p className="text-xl font-semibold text-white">
+              {formatCurrency(limitGrowth.currentTotal)}
+            </p>
+          </div>
+          <div>
+            <p className="text-sm text-gray-400">Total Growth</p>
+            <p className={`text-xl font-semibold ${limitGrowth.growthAmount >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              {limitGrowth.growthAmount >= 0 ? '+' : ''}{formatCurrency(limitGrowth.growthAmount)}
+              {limitGrowth.growthPercent > 0 && (
+                <span className="text-sm ml-1">({limitGrowth.growthPercent.toFixed(0)}%)</span>
+              )}
+            </p>
+          </div>
+        </div>
+
+        {/* Recent Changes */}
+        {recentLimitChanges.length > 0 ? (
+          <div>
+            <p className="text-sm text-gray-400 mb-3">Recent Limit Increases</p>
+            <div className="space-y-2">
+              {recentLimitChanges.map((change) => {
+                const increase = change.newLimit - change.previousLimit;
+                return (
+                  <div
+                    key={change.id}
+                    className="flex items-center justify-between py-2 border-b border-dark-border last:border-0"
                   >
-                    {monthComparison.changes.spending < 0 ? (
-                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-                      </svg>
-                    ) : monthComparison.changes.spending > 0 ? (
-                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
-                      </svg>
-                    ) : null}
-                    {Math.abs(Math.round(monthComparison.changes.spending))}%
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-gray-500 mt-1">
-                from {formatCurrency(monthComparison.lastMonth.spending)}
+                    <div className="flex items-center gap-3">
+                      {change.platform && (
+                        <span
+                          className="w-3 h-3 rounded-full"
+                          style={{ backgroundColor: change.platform.color }}
+                        />
+                      )}
+                      <div>
+                        <p className="text-white text-sm">
+                          {change.platform?.name || change.platformId}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {format(parseISO(change.changedAt), 'MMM d, yyyy')} • {change.onTimeStreakAtChange} on-time streak
+                        </p>
+                      </div>
+                    </div>
+                    <p className={`text-sm font-medium ${increase >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {increase >= 0 ? '+' : ''}{formatCurrency(increase)}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <p className="text-gray-500 text-sm">
+            No limit changes recorded yet. Changes are tracked when you update platform limits.
+          </p>
+        )}
+      </Card>
+
+      {/* Section 5: Arbitrage Performance (conditional) */}
+      {hasArbitrageOrders && (
+        <Card className="bg-gradient-to-br from-amber-500/10 to-transparent">
+          <h3 className="text-lg font-semibold text-white mb-4">Arbitrage Performance</h3>
+
+          {/* Stats */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div>
+              <p className="text-sm text-gray-400">Total Deployed</p>
+              <p className="text-xl font-semibold text-white">
+                {formatCurrency(arbitrageStats.totalPurchased)}
               </p>
             </div>
-
-            {/* Orders */}
             <div>
-              <p className="text-sm text-gray-400 mb-1">Orders</p>
-              <div className="flex items-center gap-2">
-                <span className="text-xl font-bold text-white">
-                  {monthComparison.thisMonth.orders}
-                </span>
-                {monthComparison.changes.orders !== null && (
-                  <span
-                    className={`text-sm font-medium flex items-center gap-0.5 ${
-                      monthComparison.changes.orders < 0
-                        ? 'text-green-400'
-                        : monthComparison.changes.orders > 0
-                        ? 'text-amber-400'
-                        : 'text-gray-400'
-                    }`}
-                  >
-                    {monthComparison.changes.orders < 0 ? (
-                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-                      </svg>
-                    ) : monthComparison.changes.orders > 0 ? (
-                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
-                      </svg>
-                    ) : null}
-                    {Math.abs(Math.round(monthComparison.changes.orders))}%
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-gray-500 mt-1">
-                from {monthComparison.lastMonth.orders}
+              <p className="text-sm text-gray-400">Total Sales</p>
+              <p className="text-xl font-semibold text-white">
+                {formatCurrency(arbitrageStats.totalSaleAmount)}
               </p>
             </div>
-
-            {/* Avg Order */}
             <div>
-              <p className="text-sm text-gray-400 mb-1">Avg Order</p>
-              <div className="flex items-center gap-2">
-                <span className="text-xl font-bold text-white">
-                  {formatCurrency(monthComparison.thisMonth.avgOrder)}
-                </span>
-                {monthComparison.changes.avgOrder !== null && (
-                  <span
-                    className={`text-sm font-medium flex items-center gap-0.5 ${
-                      monthComparison.changes.avgOrder < 0
-                        ? 'text-green-400'
-                        : monthComparison.changes.avgOrder > 0
-                        ? 'text-amber-400'
-                        : 'text-gray-400'
-                    }`}
-                  >
-                    {monthComparison.changes.avgOrder < 0 ? (
-                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-                      </svg>
-                    ) : monthComparison.changes.avgOrder > 0 ? (
-                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
-                      </svg>
-                    ) : null}
-                    {Math.abs(Math.round(monthComparison.changes.avgOrder))}%
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-gray-500 mt-1">
-                from {formatCurrency(monthComparison.lastMonth.avgOrder)}
+              <p className="text-sm text-gray-400">Net Cash</p>
+              <p className={`text-xl font-semibold ${arbitrageStats.totalNetCash >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {arbitrageStats.totalNetCash >= 0 ? '+' : ''}{formatCurrency(Math.abs(arbitrageStats.totalNetCash))}
+              </p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-400">Avg Cost of Capital</p>
+              <p className="text-xl font-semibold text-white">
+                {arbitrageStats.averageCostOfCapital > 0
+                  ? `${arbitrageStats.averageCostOfCapital.toFixed(1)}%`
+                  : '0%'}
               </p>
             </div>
           </div>
+
+          {/* Pending Sales */}
+          {arbitrageStats.pendingSales > 0 && (
+            <p className="text-sm text-amber-400 mb-4">
+              {arbitrageStats.pendingSales} order{arbitrageStats.pendingSales > 1 ? 's' : ''} pending sale
+            </p>
+          )}
+
+          {/* Recent Arbitrage Orders */}
+          {arbitrageOrders.length > 0 && (
+            <div>
+              <p className="text-sm text-gray-400 mb-3">Recent Orders</p>
+              <div className="space-y-2">
+                {arbitrageOrders.slice(0, 5).map((order) => {
+                  const platform = platforms.find((p) => p.id === order.platformId);
+                  return (
+                    <div
+                      key={order.id}
+                      className="flex items-center justify-between py-2 border-b border-amber-500/20 last:border-0"
+                    >
+                      <div className="flex items-center gap-3">
+                        {platform && (
+                          <span
+                            className="w-3 h-3 rounded-full"
+                            style={{ backgroundColor: platform.color }}
+                          />
+                        )}
+                        <div>
+                          <p className="text-white text-sm">
+                            {order.storeName || platform?.name || order.platformId}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {formatCurrency(order.totalAmount)} purchase
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        {order.saleAmount ? (
+                          <>
+                            <p className={`text-sm font-medium ${order.isProfitable ? 'text-green-400' : 'text-red-400'}`}>
+                              {order.netCash >= 0 ? '+' : ''}{formatCurrency(order.netCash)}
+                            </p>
+                            {!order.isProfitable && (
+                              <p className="text-xs text-gray-500">
+                                {order.costOfCapitalPercent.toFixed(1)}% cost
+                              </p>
+                            )}
+                          </>
+                        ) : (
+                          <p className="text-sm text-gray-500">Pending sale</p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </Card>
       )}
 
-      {/* Insights */}
-      {(mostUsedPlatformData || bestOnTimePlatformData) && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {mostUsedPlatformData && (
-            <Card className="bg-gradient-to-br from-blue-500/10 to-transparent">
-              <div className="flex items-center gap-3">
-                <div
-                  className="w-10 h-10 rounded-full flex items-center justify-center"
-                  style={{ backgroundColor: mostUsedPlatformData.color + '20' }}
-                >
-                  <span
-                    className="w-4 h-4 rounded-full"
-                    style={{ backgroundColor: mostUsedPlatformData.color }}
-                  />
-                </div>
-                <div>
-                  <p className="text-sm text-gray-400">Most Used Platform</p>
-                  <p className="text-lg font-semibold text-white">
-                    {mostUsedPlatformData.name}
-                  </p>
-                </div>
-              </div>
-            </Card>
-          )}
-          {bestOnTimePlatformData && bestOnTimePlatform && (
-            <Card className="bg-gradient-to-br from-green-500/10 to-transparent">
-              <div className="flex items-center gap-3">
-                <div
-                  className="w-10 h-10 rounded-full flex items-center justify-center"
-                  style={{ backgroundColor: bestOnTimePlatformData.color + '20' }}
-                >
-                  <span
-                    className="w-4 h-4 rounded-full"
-                    style={{ backgroundColor: bestOnTimePlatformData.color }}
-                  />
-                </div>
-                <div>
-                  <p className="text-sm text-gray-400">Best On-Time Rate</p>
-                  <p className="text-lg font-semibold text-white">
-                    {bestOnTimePlatformData.name} ({bestOnTimePlatform.onTimePaymentRate}%)
-                  </p>
-                </div>
-              </div>
-            </Card>
-          )}
-        </div>
-      )}
+      {/* Section 6: Order Breakdown by Type */}
+      <Card>
+        <h3 className="text-lg font-semibold text-white mb-4">Order Breakdown</h3>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card>
-          <p className="text-sm text-gray-400">Total Orders</p>
-          <p className="text-2xl font-bold text-white mt-1">
-            {overallStats.totalOrders}
-          </p>
-        </Card>
-        <Card>
-          <p className="text-sm text-gray-400">Total Spent</p>
-          <p className="text-2xl font-bold text-white mt-1">
-            {formatCurrency(overallStats.totalSpent)}
-          </p>
-        </Card>
-        <Card>
-          <p className="text-sm text-gray-400">Avg Order Size</p>
-          <p className="text-2xl font-bold text-white mt-1">
-            {formatCurrency(Math.round(overallStats.avgOrderSize))}
-          </p>
-        </Card>
-        <Card>
-          <p className="text-sm text-gray-400">On-Time Rate</p>
-          <p className="text-2xl font-bold text-white mt-1">
-            {Math.round(overallStats.onTimeRate)}%
-          </p>
-        </Card>
-      </div>
-
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Spend by Platform */}
-        <Card>
-          <h3 className="text-lg font-semibold text-white mb-4">
-            Spend by Platform
-          </h3>
-          {pieData.length > 0 ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Pie Chart */}
+          {orderTypePieData.length > 0 ? (
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
-                    data={pieData}
+                    data={orderTypePieData}
                     dataKey="value"
                     nameKey="name"
                     cx="50%"
@@ -339,7 +471,7 @@ export function AnalyticsPage() {
                     outerRadius={80}
                     paddingAngle={2}
                   >
-                    {pieData.map((entry, index) => (
+                    {orderTypePieData.map((entry, index) => (
                       <Cell key={index} fill={entry.color} />
                     ))}
                   </Pie>
@@ -357,150 +489,60 @@ export function AnalyticsPage() {
             </div>
           ) : (
             <div className="h-64 flex items-center justify-center text-gray-500">
-              No spending data yet
+              No orders yet
             </div>
           )}
-          {/* Legend */}
-          <div className="mt-4 flex flex-wrap gap-4 justify-center">
-            {pieData.map((item) => (
-              <div key={item.name} className="flex items-center gap-2">
-                <span
-                  className="w-3 h-3 rounded-full"
-                  style={{ backgroundColor: item.color }}
-                />
-                <span className="text-sm text-gray-400">{item.name}</span>
+
+          {/* Legend & Stats */}
+          <div className="flex flex-col justify-center space-y-4">
+            <div className="flex items-center gap-3">
+              <span
+                className="w-4 h-4 rounded-full"
+                style={{ backgroundColor: ORDER_TYPE_COLORS.personal }}
+              />
+              <div className="flex-1">
+                <p className="text-white">Personal</p>
+                <p className="text-sm text-gray-400">
+                  {ordersByType.personal.count} orders • {formatCurrency(ordersByType.personal.total)}
+                </p>
               </div>
-            ))}
+            </div>
+            <div className="flex items-center gap-3">
+              <span
+                className="w-4 h-4 rounded-full"
+                style={{ backgroundColor: ORDER_TYPE_COLORS.necessity }}
+              />
+              <div className="flex-1">
+                <p className="text-white">Necessity</p>
+                <p className="text-sm text-gray-400">
+                  {ordersByType.necessity.count} orders • {formatCurrency(ordersByType.necessity.total)}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <span
+                className="w-4 h-4 rounded-full"
+                style={{ backgroundColor: ORDER_TYPE_COLORS.arbitrage }}
+              />
+              <div className="flex-1">
+                <p className="text-white">Arbitrage</p>
+                <p className="text-sm text-gray-400">
+                  {ordersByType.arbitrage.count} orders • {formatCurrency(ordersByType.arbitrage.total)}
+                </p>
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-dark-border">
+              <p className="text-sm text-gray-400">Total Deployed (All Time)</p>
+              <p className="text-2xl font-bold text-white">
+                {formatCurrency(
+                  ordersByType.personal.total +
+                  ordersByType.necessity.total +
+                  ordersByType.arbitrage.total
+                )}
+              </p>
+            </div>
           </div>
-        </Card>
-
-        {/* Monthly Trends */}
-        <Card>
-          <h3 className="text-lg font-semibold text-white mb-4">
-            Monthly Spending
-          </h3>
-          {trendData.some((d) => d.amount > 0) ? (
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={trendData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#262626" />
-                  <XAxis
-                    dataKey="month"
-                    stroke="#666"
-                    tick={{ fill: '#9ca3af' }}
-                  />
-                  <YAxis
-                    stroke="#666"
-                    tick={{ fill: '#9ca3af' }}
-                    tickFormatter={(value) => `$${value}`}
-                  />
-                  <Tooltip
-                    formatter={(value) => [`$${Number(value).toFixed(2)}`, 'Spent']}
-                    contentStyle={{
-                      backgroundColor: '#1a1a1a',
-                      border: '1px solid #262626',
-                      borderRadius: '8px',
-                    }}
-                    labelStyle={{ color: '#fff' }}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="amount"
-                    stroke="#3b82f6"
-                    strokeWidth={2}
-                    dot={{ fill: '#3b82f6', strokeWidth: 0 }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          ) : (
-            <div className="h-64 flex items-center justify-center text-gray-500">
-              No spending data yet
-            </div>
-          )}
-        </Card>
-      </div>
-
-      {/* Platform Stats Table */}
-      <Card>
-        <h3 className="text-lg font-semibold text-white mb-4">
-          Platform Breakdown
-        </h3>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-dark-border">
-                <th className="text-left py-3 px-4 text-sm font-medium text-gray-400">
-                  Platform
-                </th>
-                <th className="text-right py-3 px-4 text-sm font-medium text-gray-400">
-                  Orders
-                </th>
-                <th className="text-right py-3 px-4 text-sm font-medium text-gray-400">
-                  Total Spent
-                </th>
-                <th className="text-right py-3 px-4 text-sm font-medium text-gray-400">
-                  Avg Order
-                </th>
-                <th className="text-right py-3 px-4 text-sm font-medium text-gray-400">
-                  On-Time %
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {platforms.map((platform) => {
-                const stats = platformStats.find(
-                  (s) => s.platformId === platform.id
-                );
-                if (!stats) return null;
-
-                return (
-                  <tr
-                    key={platform.id}
-                    className="border-b border-dark-border last:border-0"
-                  >
-                    <td className="py-3 px-4">
-                      <div className="flex items-center gap-2">
-                        <span
-                          className="w-3 h-3 rounded-full"
-                          style={{ backgroundColor: platform.color }}
-                        />
-                        <span className="text-white">{platform.name}</span>
-                      </div>
-                    </td>
-                    <td className="py-3 px-4 text-right text-gray-300">
-                      {stats.totalOrders}
-                    </td>
-                    <td className="py-3 px-4 text-right text-gray-300">
-                      {formatCurrency(stats.totalSpent)}
-                    </td>
-                    <td className="py-3 px-4 text-right text-gray-300">
-                      {stats.totalOrders > 0
-                        ? formatCurrency(stats.averageOrderSize)
-                        : '-'}
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      {stats.totalPayments > 0 ? (
-                        <span
-                          className={
-                            stats.onTimePaymentRate >= 90
-                              ? 'text-green-400'
-                              : stats.onTimePaymentRate >= 70
-                              ? 'text-amber-400'
-                              : 'text-red-400'
-                          }
-                        >
-                          {stats.onTimePaymentRate}%
-                        </span>
-                      ) : (
-                        <span className="text-gray-500">-</span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
         </div>
       </Card>
     </div>

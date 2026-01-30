@@ -11,6 +11,7 @@ import {
   requestPermission,
 } from '../services/notifications';
 import type { PlatformId, ExportedData } from '../types';
+import type { PlatformTier } from '../constants/platforms';
 
 type SettingsTab = 'platforms' | 'subscriptions' | 'notifications' | 'api-keys' | 'data';
 
@@ -26,6 +27,8 @@ function PlatformSettings({ platformId }: { platformId: PlatformId }) {
   const platforms = useBNPLStore((state) => state.platforms);
   const updatePlatformLimit = useBNPLStore((state) => state.updatePlatformLimit);
   const updatePlatformSchedule = useBNPLStore((state) => state.updatePlatformSchedule);
+  const updatePlatformGoal = useBNPLStore((state) => state.updatePlatformGoal);
+  const updatePlatformTier = useBNPLStore((state) => state.updatePlatformTier);
 
   const platform = platforms.find((p) => p.id === platformId);
 
@@ -37,13 +40,22 @@ function PlatformSettings({ platformId }: { platformId: PlatformId }) {
   const [intervalDays, setIntervalDays] = useState(platform?.defaultIntervalDays ?? 14);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
 
+  // Goal and tier state
+  const [isEditingGoal, setIsEditingGoal] = useState(false);
+  const [goalInput, setGoalInput] = useState(
+    platform?.goalLimit ? centsToDollars(platform.goalLimit).toString() : ''
+  );
+  const [tier, setTier] = useState<PlatformTier>(platform?.tier || 'limited');
+
   useEffect(() => {
     if (platform) {
       setLimitInput(centsToDollars(platform.creditLimit).toString());
       setInstallments(platform.defaultInstallments);
       setIntervalDays(platform.defaultIntervalDays);
+      setGoalInput(platform.goalLimit ? centsToDollars(platform.goalLimit).toString() : '');
+      setTier(platform.tier || 'limited');
     }
-  }, [platform?.creditLimit, platform?.defaultInstallments, platform?.defaultIntervalDays]);
+  }, [platform?.creditLimit, platform?.defaultInstallments, platform?.defaultIntervalDays, platform?.goalLimit, platform?.tier]);
 
   if (!platform) return null;
 
@@ -61,6 +73,23 @@ function PlatformSettings({ platformId }: { platformId: PlatformId }) {
   const handleSaveSchedule = async () => {
     setSaveStatus('saving');
     await updatePlatformSchedule(platformId, installments, intervalDays);
+    setSaveStatus('saved');
+    setTimeout(() => setSaveStatus('idle'), 2000);
+  };
+
+  const handleSaveGoal = async () => {
+    const newGoal = goalInput ? parseDollarInput(goalInput) : null;
+    setSaveStatus('saving');
+    await updatePlatformGoal(platformId, newGoal !== null && newGoal > 0 ? newGoal : undefined);
+    setSaveStatus('saved');
+    setTimeout(() => setSaveStatus('idle'), 2000);
+    setIsEditingGoal(false);
+  };
+
+  const handleChangeTier = async (newTier: PlatformTier) => {
+    setTier(newTier);
+    setSaveStatus('saving');
+    await updatePlatformTier(platformId, newTier);
     setSaveStatus('saved');
     setTimeout(() => setSaveStatus('idle'), 2000);
   };
@@ -144,6 +173,58 @@ function PlatformSettings({ platformId }: { platformId: PlatformId }) {
               </option>
             ))}
           </select>
+        </div>
+
+        {/* Tier Selector */}
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-gray-400">Tier:</span>
+          <select
+            value={tier}
+            onChange={(e) => handleChangeTier(e.target.value as PlatformTier)}
+            className="px-2 py-1 bg-dark-card border border-dark-border rounded text-white text-sm"
+          >
+            <option value="flexible">Flexible</option>
+            <option value="limited">Limited</option>
+          </select>
+        </div>
+
+        {/* Goal Limit */}
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-gray-400">Goal:</span>
+          {isEditingGoal ? (
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={goalInput}
+                onChange={(e) => setGoalInput(e.target.value)}
+                placeholder="No goal"
+                className="w-24 px-2 py-1 bg-dark-card border border-dark-border rounded text-white text-sm"
+                autoFocus
+              />
+              <Button size="sm" onClick={handleSaveGoal}>
+                Save
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setIsEditingGoal(false);
+                  setGoalInput(platform?.goalLimit ? centsToDollars(platform.goalLimit).toString() : '');
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setIsEditingGoal(true)}
+              className="text-white hover:text-blue-400 transition-colors"
+            >
+              {platform.goalLimit && platform.goalLimit > 0
+                ? formatCurrency(platform.goalLimit)
+                : 'Set goal'}
+            </button>
+          )}
         </div>
 
         {saveStatus !== 'idle' && (
@@ -536,6 +617,7 @@ function DataTab() {
   const [showImportConfirm, setShowImportConfirm] = useState(false);
   const [pendingImportData, setPendingImportData] = useState<ExportedData | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleExport = async () => {
@@ -579,18 +661,24 @@ function DataTab() {
   };
 
   const handleConfirmImport = async () => {
-    if (!pendingImportData) return;
+    if (!pendingImportData || isImporting) return;
+
+    setIsImporting(true);
+    setImportError(null);
 
     try {
       await importData(pendingImportData);
       showToast(`Imported ${pendingImportData.orders.length} orders`, 'success');
-      setImportError(null);
-    } catch (error) {
-      setImportError(error instanceof Error ? error.message : 'Failed to import data');
-      showToast('Import failed', 'error');
-    } finally {
+      // Only close modal on success
       setPendingImportData(null);
       setShowImportConfirm(false);
+    } catch (error) {
+      // Keep modal open on error so user can see the error
+      const errorMessage = error instanceof Error ? error.message : 'Failed to import data';
+      setImportError(errorMessage);
+      showToast('Import failed', 'error');
+    } finally {
+      setIsImporting(false);
     }
   };
 
@@ -652,7 +740,18 @@ function DataTab() {
         </div>
       </Modal>
 
-      <Modal isOpen={showImportConfirm} onClose={() => { setPendingImportData(null); setShowImportConfirm(false); }} title="Import Data" size="sm">
+      <Modal
+        isOpen={showImportConfirm}
+        onClose={() => {
+          if (!isImporting) {
+            setPendingImportData(null);
+            setShowImportConfirm(false);
+            setImportError(null);
+          }
+        }}
+        title="Import Data"
+        size="sm"
+      >
         <div className="space-y-4">
           <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
             <p className="text-amber-400 text-sm font-medium">Warning</p>
@@ -667,9 +766,36 @@ function DataTab() {
               </ul>
             </div>
           )}
+          {importError && (
+            <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+              <p className="text-red-400 text-sm font-medium">Import Failed</p>
+              <p className="text-gray-300 text-sm mt-1">{importError}</p>
+            </div>
+          )}
+          {isImporting && (
+            <div className="flex items-center justify-center gap-2 py-2">
+              <svg className="animate-spin h-5 w-5 text-blue-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <span className="text-gray-400 text-sm">Importing data...</span>
+            </div>
+          )}
           <div className="flex justify-end gap-3">
-            <Button variant="secondary" onClick={() => { setPendingImportData(null); setShowImportConfirm(false); }}>Cancel</Button>
-            <Button onClick={handleConfirmImport}>Import Data</Button>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setPendingImportData(null);
+                setShowImportConfirm(false);
+                setImportError(null);
+              }}
+              disabled={isImporting}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleConfirmImport} disabled={isImporting}>
+              {isImporting ? 'Importing...' : 'Import Data'}
+            </Button>
           </div>
         </div>
       </Modal>

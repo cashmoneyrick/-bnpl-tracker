@@ -9,8 +9,11 @@ import type {
   PlatformId,
   ExportedData,
   NotificationSettings,
+  LimitChange,
 } from '../types';
+import type { PlatformTier } from '../constants/platforms';
 import { storage } from '../services/storage';
+import { migrateToV2 } from '../services/migrations';
 import {
   calculatePayments,
   shiftPaymentDates,
@@ -26,6 +29,7 @@ interface BNPLStore {
   payments: Payment[];
   platforms: Platform[];
   subscriptions: Subscription[];
+  limitHistory: LimitChange[];
   notificationSettings: NotificationSettings;
   geminiApiKey: string | null;
   isLoading: boolean;
@@ -49,6 +53,8 @@ interface BNPLStore {
   deletePayment: (paymentId: string) => Promise<void>;
   addPaymentToOrder: (orderId: string, amount: number, dueDate: string) => Promise<Payment>;
   updatePlatformLimit: (platformId: PlatformId, limit: number) => Promise<void>;
+  updatePlatformGoal: (platformId: PlatformId, goalLimit: number | undefined) => Promise<void>;
+  updatePlatformTier: (platformId: PlatformId, tier: PlatformTier) => Promise<void>;
   updatePlatformSchedule: (
     platformId: PlatformId,
     installments: number,
@@ -58,6 +64,7 @@ interface BNPLStore {
   updateOverduePayments: () => Promise<void>;
   updateNotificationSettings: (settings: NotificationSettings) => void;
   setGeminiApiKey: (key: string | null) => void;
+  getLimitHistory: (platformId: PlatformId) => LimitChange[];
 
   // UI Actions
   openQuickAddModal: () => void;
@@ -78,6 +85,7 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
   payments: [],
   platforms: [],
   subscriptions: [],
+  limitHistory: [],
   notificationSettings: {
     enabled: false,
     daysBefore: 1,
@@ -107,28 +115,48 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
     try {
       await storage.init();
 
-      const [orders, payments, platforms, subscriptions] = await Promise.all([
+      const [orders, payments, platforms, subscriptions, limitHistory] = await Promise.all([
         storage.getAllOrders(),
         storage.getAllPayments(),
         storage.getAllPlatforms(),
         storage.getAllSubscriptions(),
+        storage.getAllLimitHistory(),
       ]);
 
+      // Apply migrations
+      const migrated = migrateToV2({ orders, platforms });
+
+      // Save migrated data if changed
+      if (migrated.ordersChanged) {
+        console.log('[Store] Migrating orders to v2 schema...');
+        for (const order of migrated.orders) {
+          await storage.saveOrder(order);
+        }
+      }
+      if (migrated.platformsChanged) {
+        console.log('[Store] Migrating platforms to v2 schema...');
+        for (const platform of migrated.platforms) {
+          await storage.savePlatform(platform);
+        }
+      }
+
       console.log('[Store] Initialized with:', {
-        orders: orders.length,
+        orders: migrated.orders.length,
         payments: payments.length,
-        platforms: platforms.length,
+        platforms: migrated.platforms.length,
         subscriptions: subscriptions.length,
+        limitHistory: limitHistory.length,
       });
 
       const notificationSettings = storage.getNotificationSettings();
       const geminiApiKey = storage.getGeminiApiKey();
 
       set({
-        orders,
+        orders: migrated.orders,
         payments,
-        platforms,
+        platforms: migrated.platforms,
         subscriptions,
+        limitHistory,
         notificationSettings,
         geminiApiKey,
         isLoading: false,
@@ -181,6 +209,9 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
       intervalDays: input.intervalDays, // Store per-order interval if provided
       customInstallments: input.customInstallments,
       apr: input.apr,
+      orderType: input.orderType || 'personal',
+      saleAmount: input.saleAmount,
+      saleDate: input.saleDate,
     };
 
     // Create payment records
@@ -198,6 +229,13 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
         isManualOverride: !!override,
       };
     });
+
+    // Auto-mark first payment as paid (down payment already made at checkout)
+    if (paymentRecords.length > 0) {
+      paymentRecords[0].status = 'paid';
+      paymentRecords[0].paidDate = order.createdAt;
+      paymentRecords[0].paidOnTime = true;
+    }
 
     // Save to storage (transactional - rollback on failure)
     const savedPaymentIds: string[] = [];
@@ -532,8 +570,61 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
     return newPayment;
   },
 
-  // Update platform credit limit
+  // Update platform credit limit (with history tracking)
   updatePlatformLimit: async (platformId: PlatformId, limit: number) => {
+    const { platforms, payments } = get();
+    const platform = platforms.find((p) => p.id === platformId);
+
+    if (!platform) {
+      throw new Error(`Platform not found: ${platformId}`);
+    }
+
+    // Only record history if limit actually changed
+    if (platform.creditLimit !== limit) {
+      // Calculate current on-time streak for this platform
+      const platformPayments = payments
+        .filter((p) => p.platformId === platformId && p.status === 'paid')
+        .sort((a, b) => {
+          const dateA = a.paidDate ? parseISO(a.paidDate) : new Date(0);
+          const dateB = b.paidDate ? parseISO(b.paidDate) : new Date(0);
+          return dateB.getTime() - dateA.getTime(); // Most recent first
+        });
+
+      let streak = 0;
+      for (const payment of platformPayments) {
+        if (payment.paidOnTime) {
+          streak++;
+        } else {
+          break;
+        }
+      }
+
+      // Create limit change record
+      const limitChange: LimitChange = {
+        id: uuidv4(),
+        platformId,
+        previousLimit: platform.creditLimit,
+        newLimit: limit,
+        changedAt: new Date().toISOString(),
+        onTimeStreakAtChange: streak,
+      };
+
+      await storage.saveLimitChange(limitChange);
+
+      const updatedPlatform = { ...platform, creditLimit: limit };
+      await storage.savePlatform(updatedPlatform);
+
+      set((state) => ({
+        platforms: state.platforms.map((p) =>
+          p.id === platformId ? updatedPlatform : p
+        ),
+        limitHistory: [...state.limitHistory, limitChange],
+      }));
+    }
+  },
+
+  // Update platform goal limit
+  updatePlatformGoal: async (platformId: PlatformId, goalLimit: number | undefined) => {
     const { platforms } = get();
     const platform = platforms.find((p) => p.id === platformId);
 
@@ -541,7 +632,26 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
       throw new Error(`Platform not found: ${platformId}`);
     }
 
-    const updatedPlatform = { ...platform, creditLimit: limit };
+    const updatedPlatform = { ...platform, goalLimit };
+    await storage.savePlatform(updatedPlatform);
+
+    set((state) => ({
+      platforms: state.platforms.map((p) =>
+        p.id === platformId ? updatedPlatform : p
+      ),
+    }));
+  },
+
+  // Update platform tier
+  updatePlatformTier: async (platformId: PlatformId, tier: PlatformTier) => {
+    const { platforms } = get();
+    const platform = platforms.find((p) => p.id === platformId);
+
+    if (!platform) {
+      throw new Error(`Platform not found: ${platformId}`);
+    }
+
+    const updatedPlatform = { ...platform, tier };
     await storage.savePlatform(updatedPlatform);
 
     set((state) => ({
@@ -642,6 +752,14 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
     set({ geminiApiKey: key });
   },
 
+  // Get limit history for a platform
+  getLimitHistory: (platformId: PlatformId) => {
+    const { limitHistory } = get();
+    return limitHistory
+      .filter((lc) => lc.platformId === platformId)
+      .sort((a, b) => parseISO(a.changedAt).getTime() - parseISO(b.changedAt).getTime());
+  },
+
   // UI Actions
   openQuickAddModal: () => set({ quickAddModalOpen: true }),
   closeQuickAddModal: () => set({ quickAddModalOpen: false }),
@@ -665,28 +783,45 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
     console.log('[Store] Importing data:', {
       orders: data.orders.length,
       payments: data.payments.length,
+      limitHistory: data.limitHistory?.length || 0,
     });
 
     await storage.importData(data);
 
     // Reload state
-    const [orders, payments, platforms, subscriptions] = await Promise.all([
+    const [orders, payments, platforms, subscriptions, limitHistory] = await Promise.all([
       storage.getAllOrders(),
       storage.getAllPayments(),
       storage.getAllPlatforms(),
       storage.getAllSubscriptions(),
+      storage.getAllLimitHistory(),
     ]);
 
+    // Apply migrations to imported data
+    const migrated = migrateToV2({ orders, platforms });
+    if (migrated.ordersChanged) {
+      for (const order of migrated.orders) {
+        await storage.saveOrder(order);
+      }
+    }
+    if (migrated.platformsChanged) {
+      for (const platform of migrated.platforms) {
+        await storage.savePlatform(platform);
+      }
+    }
+
     console.log('[Store] After import, loaded:', {
-      orders: orders.length,
+      orders: migrated.orders.length,
       payments: payments.length,
+      limitHistory: limitHistory.length,
     });
 
     set({
-      orders,
+      orders: migrated.orders,
       payments,
-      platforms,
+      platforms: migrated.platforms,
       subscriptions,
+      limitHistory,
     });
 
     // Update overdue statuses
@@ -702,11 +837,15 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
       storage.getAllSubscriptions(),
     ]);
 
+    // Apply migrations to default platforms
+    const migrated = migrateToV2({ orders: [], platforms });
+
     set({
       orders: [],
       payments: [],
-      platforms,
+      platforms: migrated.platforms,
       subscriptions,
+      limitHistory: [],
     });
   },
 }));

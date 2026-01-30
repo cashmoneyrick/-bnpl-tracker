@@ -61,6 +61,9 @@ export const DEFAULT_PLATFORMS = [
 // Derive PlatformId type from DEFAULT_PLATFORMS
 export type PlatformId = (typeof DEFAULT_PLATFORMS)[number]['id'];
 
+// Platform tier classification
+export type PlatformTier = 'flexible' | 'limited';
+
 // Subscription interface defined here to avoid circular dependency with types/index.ts
 export interface Subscription {
   platformId: PlatformId;
@@ -78,7 +81,30 @@ export interface Platform {
   color: string;
   defaultInstallments: number;
   defaultIntervalDays: number;
+  // Goal tracking
+  goalLimit?: number; // in cents - target limit user wants to reach
+  tier?: PlatformTier; // 'flexible' (virtual Visa) or 'limited' (merchant-specific)
 }
+
+// Default goals for each platform (in cents)
+export const DEFAULT_PLATFORM_GOALS: Record<PlatformId, number> = {
+  sezzle: 300000,   // $3,000
+  klarna: 75000,    // $750
+  zip: 100000,      // $1,000
+  afterpay: 200000, // $2,000
+  four: 30000,      // $300
+  affirm: 0,        // No set goal for Affirm (variable)
+};
+
+// Default tier for each platform
+export const DEFAULT_PLATFORM_TIERS: Record<PlatformId, PlatformTier> = {
+  sezzle: 'flexible',  // Virtual Visa
+  klarna: 'flexible',  // Virtual Visa
+  zip: 'flexible',     // Virtual Visa
+  afterpay: 'limited', // Merchant-specific
+  four: 'limited',     // Merchant-specific
+  affirm: 'limited',   // Merchant-specific
+};
 
 // Generate PLATFORM_COLORS from DEFAULT_PLATFORMS
 export const PLATFORM_COLORS: Record<PlatformId, string> = Object.fromEntries(

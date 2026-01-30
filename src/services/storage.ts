@@ -1,8 +1,8 @@
-import type { Order, Payment, Platform, Subscription, ExportedData, NotificationSettings } from '../types';
+import type { Order, Payment, Platform, Subscription, ExportedData, NotificationSettings, LimitChange } from '../types';
 import { DEFAULT_PLATFORMS, DEFAULT_SUBSCRIPTIONS } from '../constants/platforms';
 
 const DB_NAME = 'bnpl-tracker';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // Bumped for limitHistory store
 const BACKUP_KEY = 'bnpl-tracker-backup';
 const NOTIFICATION_SETTINGS_KEY = 'bnpl-notification-settings';
 const GEMINI_API_KEY_KEY = 'bnpl-gemini-api-key';
@@ -12,6 +12,7 @@ interface DBSchema {
   payments: Payment;
   platforms: Platform;
   subscriptions: Subscription;
+  limitHistory: LimitChange;
 }
 
 type StoreName = keyof DBSchema;
@@ -100,6 +101,13 @@ class StorageService {
           const subsStore = db.createObjectStore('subscriptions', { keyPath: 'platformId' });
           subsStore.createIndex('by-active', 'isActive');
         }
+
+        // Create limitHistory store (added in v2)
+        if (!db.objectStoreNames.contains('limitHistory')) {
+          const limitStore = db.createObjectStore('limitHistory', { keyPath: 'id' });
+          limitStore.createIndex('by-platform', 'platformId');
+          limitStore.createIndex('by-date', 'changedAt');
+        }
       };
     });
 
@@ -159,6 +167,11 @@ class StorageService {
 
   async getAll<T>(storeName: StoreName): Promise<T[]> {
     await this.init();
+    // Return empty array if store doesn't exist
+    if (!this.db?.objectStoreNames.contains(storeName)) {
+      console.warn(`[Storage] Store '${storeName}' does not exist, returning empty array`);
+      return [];
+    }
     return new Promise((resolve, reject) => {
       const store = this.getStore(storeName);
       const request = store.getAll();
@@ -223,12 +236,56 @@ class StorageService {
     value: IDBValidKey
   ): Promise<T[]> {
     await this.init();
+    // Return empty array if store doesn't exist
+    if (!this.db?.objectStoreNames.contains(storeName)) {
+      console.warn(`[Storage] Store '${storeName}' does not exist, returning empty array`);
+      return [];
+    }
     return new Promise((resolve, reject) => {
       const store = this.getStore(storeName);
       const index = store.index(indexName);
       const request = index.getAll(value);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
+    });
+  }
+
+  // Batch insert for better import performance
+  private async batchPut<T>(
+    storeName: StoreName,
+    items: T[]
+  ): Promise<void> {
+    if (items.length === 0) return;
+
+    await this.init();
+    return new Promise((resolve, reject) => {
+      if (!this.db) {
+        reject(new Error('Database not initialized'));
+        return;
+      }
+
+      // Check if the store exists before trying to access it
+      if (!this.db.objectStoreNames.contains(storeName)) {
+        console.warn(`[Storage] Store '${storeName}' does not exist, skipping batch insert`);
+        resolve();
+        return;
+      }
+
+      const transaction = this.db.transaction(storeName, 'readwrite');
+      const store = transaction.objectStore(storeName);
+
+      transaction.oncomplete = () => {
+        console.log(`[Storage] Batch inserted ${items.length} items into ${storeName}`);
+        resolve();
+      };
+      transaction.onerror = () => {
+        console.error(`[Storage] Batch insert failed for ${storeName}:`, transaction.error);
+        reject(transaction.error);
+      };
+
+      for (const item of items) {
+        store.put(item);
+      }
     });
   }
 
@@ -309,6 +366,23 @@ class StorageService {
     return this.put('subscriptions', subscription);
   }
 
+  // Limit History
+  async getAllLimitHistory(): Promise<LimitChange[]> {
+    return this.getAll<LimitChange>('limitHistory');
+  }
+
+  async saveLimitChange(change: LimitChange): Promise<void> {
+    return this.put('limitHistory', change);
+  }
+
+  async getLimitHistoryByPlatform(platformId: string): Promise<LimitChange[]> {
+    return this.getByIndex<LimitChange>('limitHistory', 'by-platform', platformId);
+  }
+
+  async deleteLimitChange(id: string): Promise<void> {
+    return this.delete('limitHistory', id);
+  }
+
   // Notification Settings (stored in localStorage for simplicity)
   getNotificationSettings(): NotificationSettings {
     try {
@@ -366,27 +440,37 @@ class StorageService {
 
   // Export/Import
   async exportData(): Promise<ExportedData> {
-    const [orders, payments, platforms, subscriptions] = await Promise.all([
+    const [orders, payments, platforms, subscriptions, limitHistory] = await Promise.all([
       this.getAllOrders(),
       this.getAllPayments(),
       this.getAllPlatforms(),
       this.getAllSubscriptions(),
+      this.getAllLimitHistory(),
     ]);
 
     return {
-      version: 1,
+      version: 2,
       exportedAt: new Date().toISOString(),
       orders,
       payments,
       platforms,
       subscriptions,
+      limitHistory,
     };
   }
 
   async importData(data: ExportedData): Promise<void> {
-    // Validate version
-    if (data.version !== 1) {
+    // Validate version - support v1 and v2
+    if (data.version !== 1 && data.version !== 2) {
       throw new Error(`Unsupported data version: ${data.version}`);
+    }
+
+    // Validate required arrays
+    if (!Array.isArray(data.orders)) {
+      throw new Error('Invalid data: orders must be an array');
+    }
+    if (!Array.isArray(data.payments)) {
+      throw new Error('Invalid data: payments must be an array');
     }
 
     // Clear the localStorage backup FIRST to prevent recursive restore loop
@@ -396,33 +480,34 @@ class StorageService {
     // Clear existing data
     await this.clearAllData();
 
-    // Import platforms first
-    for (const platform of data.platforms) {
-      await this.savePlatform(platform);
+    // Use batch operations for better performance
+    // This uses a single IndexedDB transaction per store instead of one per item
+    await this.batchPut('platforms', data.platforms || []);
+    await this.batchPut('subscriptions', data.subscriptions || []);
+    await this.batchPut('orders', data.orders);
+    await this.batchPut('payments', data.payments);
+
+    // Import limit history (v2+)
+    if (data.limitHistory && data.limitHistory.length > 0) {
+      await this.batchPut('limitHistory', data.limitHistory);
     }
 
-    // Import subscriptions
-    for (const subscription of data.subscriptions) {
-      await this.saveSubscription(subscription);
-    }
-
-    // Import orders
-    for (const order of data.orders) {
-      await this.saveOrder(order);
-    }
-
-    // Import payments
-    for (const payment of data.payments) {
-      await this.savePayment(payment);
-    }
+    // Save backup after successful import
+    this.saveBackup();
   }
 
   async clearAllData(): Promise<void> {
     await this.init();
 
-    const storeNames: StoreName[] = ['orders', 'payments', 'platforms', 'subscriptions'];
+    const storeNames: StoreName[] = ['orders', 'payments', 'platforms', 'subscriptions', 'limitHistory'];
 
     for (const storeName of storeNames) {
+      // Check if store exists before trying to clear it
+      if (!this.db?.objectStoreNames.contains(storeName)) {
+        console.warn(`[Storage] Store '${storeName}' does not exist, skipping clear`);
+        continue;
+      }
+
       await new Promise<void>((resolve, reject) => {
         const store = this.getStore(storeName, 'readwrite');
         const request = store.clear();
@@ -445,16 +530,18 @@ export async function debugStorage(): Promise<void> {
   // Check IndexedDB
   console.log('=== IndexedDB Contents ===');
   try {
-    const [orders, payments, platforms, subscriptions] = await Promise.all([
+    const [orders, payments, platforms, subscriptions, limitHistory] = await Promise.all([
       storage.getAllOrders(),
       storage.getAllPayments(),
       storage.getAllPlatforms(),
       storage.getAllSubscriptions(),
+      storage.getAllLimitHistory(),
     ]);
     console.log('Orders:', orders.length, orders);
     console.log('Payments:', payments.length, payments);
     console.log('Platforms:', platforms.length, platforms);
     console.log('Subscriptions:', subscriptions.length, subscriptions);
+    console.log('Limit History:', limitHistory.length, limitHistory);
   } catch (err) {
     console.error('IndexedDB error:', err);
   }

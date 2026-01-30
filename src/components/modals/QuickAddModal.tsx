@@ -13,8 +13,15 @@ import {
 } from '../../utils/currency';
 import { formatDateInput, isValidDateString } from '../../utils/date';
 import { parseISO, format } from 'date-fns';
-import { ORDER_TAG_OPTIONS, type PlatformId } from '../../types';
+import { ORDER_TAG_OPTIONS, type PlatformId, type OrderType } from '../../types';
 import { AFFIRM_INSTALLMENT_OPTIONS } from '../../constants/platforms';
+
+// Order type options for the selector
+const ORDER_TYPE_OPTIONS: Array<{ value: OrderType; label: string; color: string; bgColor: string }> = [
+  { value: 'personal', label: 'Personal', color: '#3b82f6', bgColor: 'rgba(59, 130, 246, 0.2)' },
+  { value: 'necessity', label: 'Necessity', color: '#22c55e', bgColor: 'rgba(34, 197, 94, 0.2)' },
+  { value: 'arbitrage', label: 'Arbitrage', color: '#f59e0b', bgColor: 'rgba(245, 158, 11, 0.2)' },
+];
 
 export function QuickAddModal() {
   const { showToast } = useToast();
@@ -56,6 +63,10 @@ export function QuickAddModal() {
 
   // Notes
   const [notes, setNotes] = useState('');
+
+  // Order type
+  const [orderType, setOrderType] = useState<OrderType>('personal');
+  const [saleAmountInput, setSaleAmountInput] = useState('');
 
   // Manual overrides - tracks which payments have been manually edited
   const [overrides, setOverrides] = useState<
@@ -448,6 +459,8 @@ export function QuickAddModal() {
       setShowCustomInterval(false);
       setSelectedTags([]);
       setNotes('');
+      setOrderType('personal');
+      setSaleAmountInput('');
       setOverrides({});
       setShowAdvanced(false);
       setShowJsonInput(false);
@@ -605,6 +618,12 @@ export function QuickAddModal() {
     setIsSubmitting(true);
 
     try {
+      // Parse sale amount for arbitrage orders
+      const saleAmountParsed = orderType === 'arbitrage' && saleAmountInput
+        ? parseDollarInput(saleAmountInput)
+        : null;
+      const saleAmountCents = saleAmountParsed && saleAmountParsed > 0 ? saleAmountParsed : undefined;
+
       const { payments: createdPayments } = await addOrder({
         platformId,
         storeName: storeName.trim() || undefined,
@@ -620,6 +639,8 @@ export function QuickAddModal() {
             : undefined,
         paymentOverrides:
           Object.keys(overrides).length > 0 ? overrides : undefined,
+        orderType,
+        saleAmount: saleAmountCents,
       });
 
       // Mark payments as paid based on JSON import statuses
@@ -677,6 +698,36 @@ export function QuickAddModal() {
                   style={{ backgroundColor: p.color }}
                 />
                 <span className="font-medium">{p.name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Order Type Selector */}
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-3">
+            Order Type
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+            {ORDER_TYPE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setOrderType(opt.value)}
+                className={`
+                  flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border-2 transition-all
+                  ${
+                    orderType === opt.value
+                      ? 'border-current'
+                      : 'border-dark-border hover:border-gray-600'
+                  }
+                `}
+                style={{
+                  color: orderType === opt.value ? opt.color : '#9ca3af',
+                  backgroundColor: orderType === opt.value ? opt.bgColor : 'transparent',
+                }}
+              >
+                <span className="font-medium">{opt.label}</span>
               </button>
             ))}
           </div>
@@ -750,6 +801,17 @@ export function QuickAddModal() {
             amountInput && !amountInCents ? 'Enter a valid amount' : undefined
           }
         />
+
+        {/* Expected Sale Amount (for arbitrage orders) */}
+        {orderType === 'arbitrage' && (
+          <Input
+            label="Expected Sale Amount (optional)"
+            placeholder="0.00"
+            value={saleAmountInput}
+            onChange={(e) => setSaleAmountInput(formatNumberInput(e.target.value))}
+            helperText="What you expect to sell this item for"
+          />
+        )}
 
         {/* First Payment Date */}
         <Input

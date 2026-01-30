@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { PlatformTabs } from './PlatformTabs';
 import { PlatformCreditBar } from './PlatformCreditBar';
 import { PlatformStatsPanel } from './PlatformStatsPanel';
@@ -6,39 +6,27 @@ import { PlatformOrdersList } from './PlatformOrdersList';
 import { PlatformPaymentSchedule } from './PlatformPaymentSchedule';
 import { CollapsibleSection } from '../shared/CollapsibleSection';
 import { PlatformIcon } from '../shared/PlatformIcon';
-import { useBNPLStore } from '../../store';
 import { useOrdersByPlatform, usePlatform } from '../../store/selectors';
 import type { PlatformId } from '../../types';
 
 export function PlatformDashboardView() {
-  const platforms = useBNPLStore((state) => state.platforms);
   const [selectedPlatformId, setSelectedPlatformId] = useState<PlatformId | null>(null);
 
-  // Auto-select first platform on mount
-  useEffect(() => {
-    if (!selectedPlatformId && platforms.length > 0) {
-      setSelectedPlatformId(platforms[0].id);
-    }
-  }, [platforms, selectedPlatformId]);
-
-  if (!selectedPlatformId) {
-    return (
-      <div className="text-center py-12">
-        <p className="text-gray-400">Loading platforms...</p>
-      </div>
-    );
-  }
+  // Toggle selection - clicking selected tab deselects it
+  const handleSelect = (id: PlatformId) => {
+    setSelectedPlatformId(selectedPlatformId === id ? null : id);
+  };
 
   return (
     <div className="space-y-6">
       {/* Platform Tabs */}
       <PlatformTabs
         selectedId={selectedPlatformId}
-        onSelect={setSelectedPlatformId}
+        onSelect={handleSelect}
       />
 
       {/* Selected Platform Content */}
-      <PlatformContent platformId={selectedPlatformId} />
+      {selectedPlatformId && <PlatformContent platformId={selectedPlatformId} />}
     </div>
   );
 }

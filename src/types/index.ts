@@ -1,8 +1,21 @@
 // Import platform types from constants (single source of truth)
-import type { PlatformId, Platform, Subscription } from '../constants/platforms';
+import type { PlatformId, Platform, Subscription, PlatformTier } from '../constants/platforms';
 
 // Re-export for consumers
-export type { PlatformId, Platform, Subscription };
+export type { PlatformId, Platform, Subscription, PlatformTier };
+
+// Order type classification
+export type OrderType = 'necessity' | 'arbitrage' | 'personal';
+
+// Limit change tracking for credit growth history
+export interface LimitChange {
+  id: string;
+  platformId: PlatformId;
+  previousLimit: number;  // in cents
+  newLimit: number;       // in cents
+  changedAt: string;      // ISO timestamp
+  onTimeStreakAtChange: number;  // streak when limit changed
+}
 
 export interface Order {
   id: string;
@@ -18,6 +31,11 @@ export interface Order {
   intervalDays?: number; // Days between payments, overrides platform default
   customInstallments?: number; // For Affirm or custom schedules
   apr?: number; // e.g., 0.15 = 15% (Affirm-specific)
+  // Order classification (for analytics)
+  orderType?: OrderType; // defaults to 'personal'
+  // Arbitrage tracking (when orderType === 'arbitrage')
+  saleAmount?: number; // in cents - what you sold it for
+  saleDate?: string; // ISO date - when you received the cash
 }
 
 // Default tag options for orders
@@ -57,6 +75,9 @@ export interface NewOrderInput {
   customInstallments?: number; // for Affirm or custom schedules
   apr?: number; // for Affirm
   paymentOverrides?: Record<number, { amount?: number; dueDate?: string }>; // installmentNumber -> overrides
+  orderType?: OrderType; // defaults to 'personal'
+  saleAmount?: number; // for arbitrage orders
+  saleDate?: string; // for arbitrage orders
 }
 
 export interface NewPaymentInput {
@@ -113,4 +134,5 @@ export interface ExportedData {
   payments: Payment[];
   platforms: Platform[];
   subscriptions: Subscription[];
+  limitHistory?: LimitChange[]; // optional for backwards compatibility
 }

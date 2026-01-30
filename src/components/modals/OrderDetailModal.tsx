@@ -8,7 +8,7 @@ import { useOrder, useOrderPayments, usePlatform } from '../../store/selectors';
 import { formatCurrency, parseDollarInput, formatNumberInput } from '../../utils/currency';
 import { formatDateInput } from '../../utils/date';
 import { format, parseISO } from 'date-fns';
-import { ORDER_TAG_OPTIONS, type PlatformId, type Order } from '../../types';
+import { ORDER_TAG_OPTIONS, type PlatformId, type Order, type OrderType } from '../../types';
 
 export function OrderDetailModal() {
   const { showToast } = useToast();
@@ -39,6 +39,12 @@ export function OrderDetailModal() {
   const [showCustomIntervalEdit, setShowCustomIntervalEdit] = useState(false);
   const [editCreatedAt, setEditCreatedAt] = useState('');
   const [editStatus, setEditStatus] = useState<Order['status']>('active');
+  const [editOrderType, setEditOrderType] = useState<OrderType>('personal');
+
+  // Arbitrage editing states
+  const [editingSaleInfo, setEditingSaleInfo] = useState(false);
+  const [editSaleAmount, setEditSaleAmount] = useState('');
+  const [editSaleDate, setEditSaleDate] = useState('');
 
   // Status options for editing
   const STATUS_OPTIONS: { value: Order['status']; label: string }[] = [
@@ -55,6 +61,13 @@ export function OrderDetailModal() {
     { label: 'Bi-weekly', days: 14 },
     { label: 'Monthly', days: 30 },
     { label: 'Custom', days: -1 },
+  ];
+
+  // Order type options
+  const ORDER_TYPE_OPTIONS: Array<{ value: OrderType; label: string; color: string; bgColor: string }> = [
+    { value: 'personal', label: 'Personal', color: '#3b82f6', bgColor: 'rgba(59, 130, 246, 0.2)' },
+    { value: 'necessity', label: 'Necessity', color: '#22c55e', bgColor: 'rgba(34, 197, 94, 0.2)' },
+    { value: 'arbitrage', label: 'Arbitrage', color: '#f59e0b', bgColor: 'rgba(245, 158, 11, 0.2)' },
   ];
 
   // Per-payment editing
@@ -79,6 +92,9 @@ export function OrderDetailModal() {
       setShowAddPayment(false);
       setNewPaymentAmount('');
       setNewPaymentDate('');
+      setEditingSaleInfo(false);
+      setEditSaleAmount('');
+      setEditSaleDate('');
     }
   }, [isOpen]);
 
@@ -128,6 +144,7 @@ export function OrderDetailModal() {
     setShowCustomIntervalEdit(currentInterval > 0 && !isPreset);
     setEditCreatedAt(order.createdAt.split('T')[0]);
     setEditStatus(order.status);
+    setEditOrderType(order.orderType || 'personal');
     setEditingOrderInfo(true);
   };
 
@@ -180,6 +197,11 @@ export function OrderDetailModal() {
       if (editStatus !== order.status) {
         updates.status = editStatus;
       }
+      // Handle order type change
+      const currentOrderType = order.orderType || 'personal';
+      if (editOrderType !== currentOrderType) {
+        updates.orderType = editOrderType;
+      }
 
       if (Object.keys(updates).length > 0) {
         await updateOrder(order.id, updates);
@@ -200,6 +222,65 @@ export function OrderDetailModal() {
       showToast(errorMsg, 'error');
     }
   };
+
+  // Arbitrage sale info editing
+  const handleStartEditSaleInfo = () => {
+    setEditSaleAmount(order.saleAmount ? (order.saleAmount / 100).toFixed(2) : '');
+    setEditSaleDate(order.saleDate || '');
+    setEditingSaleInfo(true);
+  };
+
+  const handleSaveSaleInfo = async () => {
+    try {
+      const updates: Record<string, unknown> = {};
+      const newSaleAmount = editSaleAmount ? parseDollarInput(editSaleAmount) : null;
+
+      // Handle sale amount change
+      if (newSaleAmount !== null && newSaleAmount > 0) {
+        if (newSaleAmount !== order.saleAmount) {
+          updates.saleAmount = newSaleAmount;
+        }
+      } else if (order.saleAmount && !editSaleAmount) {
+        // Clear sale amount if emptied
+        updates.saleAmount = undefined;
+      }
+
+      // Handle sale date change
+      if (editSaleDate !== (order.saleDate || '')) {
+        updates.saleDate = editSaleDate || undefined;
+      }
+
+      if (Object.keys(updates).length > 0) {
+        await updateOrder(order.id, updates);
+        showToast('Sale info updated', 'success');
+      }
+      setEditingSaleInfo(false);
+    } catch (error) {
+      console.error('Failed to update sale info:', error);
+      showToast('Failed to update sale info', 'error');
+    }
+  };
+
+  const handleMarkAsSold = async () => {
+    try {
+      const today = formatDateInput(new Date());
+      await updateOrder(order.id, { saleDate: today });
+      showToast('Marked as sold', 'success');
+    } catch (error) {
+      console.error('Failed to mark as sold:', error);
+      showToast('Failed to mark as sold', 'error');
+    }
+  };
+
+  // Computed arbitrage metrics
+  const netCash = order.saleAmount && order.totalAmount
+    ? order.saleAmount - order.totalAmount
+    : null;
+  const costOfCapitalPercent = order.saleAmount && order.totalAmount && order.saleAmount < order.totalAmount
+    ? ((order.totalAmount - order.saleAmount) / order.totalAmount) * 100
+    : null;
+  const isArbitrageOrder = order.orderType === 'arbitrage';
+  const orderTypeInfo = ORDER_TYPE_OPTIONS.find(o => o.value === (order.orderType || 'personal'));
 
   // Payment editing
   const handleStartEditPayment = (paymentId: string) => {
@@ -377,6 +458,29 @@ export function OrderDetailModal() {
                   ))}
                 </div>
               </div>
+              {/* Order Type */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">
+                  Order Type
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {ORDER_TYPE_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setEditOrderType(opt.value)}
+                      className="px-3 py-1 text-sm rounded-full transition-colors border"
+                      style={{
+                        backgroundColor: editOrderType === opt.value ? opt.bgColor : 'transparent',
+                        borderColor: editOrderType === opt.value ? opt.color : 'var(--color-dark-border, #374151)',
+                        color: editOrderType === opt.value ? opt.color : '#9ca3af',
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
               {/* First Payment Date */}
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-1.5">
@@ -479,6 +583,18 @@ export function OrderDetailModal() {
                   <h3 className="text-lg font-semibold text-white">{platform.name}</h3>
                   {order.storeName && (
                     <p className="text-sm text-gray-400">{order.storeName}</p>
+                  )}
+                  {/* Order Type Badge */}
+                  {orderTypeInfo && (
+                    <span
+                      className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium mt-1"
+                      style={{
+                        backgroundColor: orderTypeInfo.bgColor,
+                        color: orderTypeInfo.color,
+                      }}
+                    >
+                      {orderTypeInfo.label}
+                    </span>
                   )}
                   {order.tags && order.tags.length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-1">
@@ -584,6 +700,116 @@ export function OrderDetailModal() {
             )}
           </div>
         </div>
+
+        {/* Arbitrage Section - only show for arbitrage orders */}
+        {isArbitrageOrder && (
+          <div className="p-4 bg-amber-500/5 border border-amber-500/20 rounded-lg">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-medium text-amber-400">Arbitrage Details</h4>
+              {!editingSaleInfo && (
+                <button
+                  onClick={handleStartEditSaleInfo}
+                  className="p-1.5 text-gray-400 hover:text-white transition-colors rounded"
+                  title="Edit sale info"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                  </svg>
+                </button>
+              )}
+            </div>
+
+            {editingSaleInfo ? (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Sale Amount</label>
+                    <div className="relative">
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                      <input
+                        type="text"
+                        value={editSaleAmount}
+                        onChange={(e) => setEditSaleAmount(formatNumberInput(e.target.value))}
+                        className="w-full pl-6 pr-2 py-1.5 bg-dark-card border border-dark-border rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                        placeholder="0.00"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Sale Date</label>
+                    <input
+                      type="date"
+                      value={editSaleDate}
+                      onChange={(e) => setEditSaleDate(e.target.value)}
+                      className="w-full px-2 py-1.5 bg-dark-card border border-dark-border rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={handleSaveSaleInfo}>
+                    Save
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setEditingSaleInfo(false)}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-xs text-gray-500">Sale Amount</p>
+                    <p className="text-white font-medium">
+                      {order.saleAmount ? formatCurrency(order.saleAmount) : '—'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500">Sale Date</p>
+                    <p className="text-white font-medium">
+                      {order.saleDate ? formatDate(order.saleDate) : '—'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Computed metrics */}
+                {order.saleAmount && (
+                  <div className="grid grid-cols-2 gap-4 pt-3 border-t border-amber-500/20">
+                    <div>
+                      <p className="text-xs text-gray-500">Net Cash</p>
+                      <p className={`font-semibold ${netCash && netCash >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {netCash !== null ? (netCash >= 0 ? '+' : '') + formatCurrency(Math.abs(netCash)) : '—'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500">Cost of Capital</p>
+                      <p className={`font-semibold ${costOfCapitalPercent !== null ? 'text-red-400' : 'text-green-400'}`}>
+                        {costOfCapitalPercent !== null
+                          ? `${costOfCapitalPercent.toFixed(1)}%`
+                          : 'Profitable'}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Mark as Sold button */}
+                {!order.saleDate && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={handleMarkAsSold}
+                    className="w-full mt-2"
+                  >
+                    Mark as Sold
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Payment Schedule */}
         <div>

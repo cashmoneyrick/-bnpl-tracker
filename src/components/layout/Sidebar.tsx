@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useBNPLStore } from '../../store';
 import { useOverduePayments } from '../../store/selectors';
 
@@ -22,6 +22,20 @@ const navItems: NavItem[] = [
           strokeLinejoin="round"
           strokeWidth={2}
           d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"
+        />
+      </svg>
+    ),
+  },
+  {
+    to: '/canvas',
+    label: 'Canvas',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
         />
       </svg>
     ),
@@ -108,6 +122,7 @@ const navItems: NavItem[] = [
 
 export function Sidebar() {
   const location = useLocation();
+  const navigate = useNavigate();
   const openQuickAddModal = useBNPLStore((state) => state.openQuickAddModal);
   const collapsed = useBNPLStore((state) => state.sidebarCollapsed);
   const toggleSidebar = useBNPLStore((state) => state.toggleSidebar);
@@ -127,15 +142,6 @@ export function Sidebar() {
     if (!item.children) return false;
     return item.children.some(
       (child) => child.to && location.pathname === child.to
-    );
-  };
-
-  // Toggle section expansion
-  const toggleSection = (label: string) => {
-    setExpandedSections((prev) =>
-      prev.includes(label)
-        ? prev.filter((s) => s !== label)
-        : [...prev, label]
     );
   };
 
@@ -214,13 +220,14 @@ export function Sidebar() {
 
           // Render section with children
           if (hasChildren) {
+            // Get the first child's path as the section link (e.g., /budgeting)
+            const sectionPath = item.children![0].to;
+
             return (
               <div key={item.label}>
-                {/* Section Header */}
-                <button
-                  onClick={() => !collapsed && toggleSection(item.label)}
-                  title={collapsed ? item.label : undefined}
-                  className={`w-full flex items-center gap-3 rounded-lg transition-colors ${
+                {/* Section Header - clickable to navigate */}
+                <div
+                  className={`flex items-center gap-3 rounded-lg transition-colors ${
                     collapsed ? 'justify-center p-2.5' : 'px-3 py-2.5'
                   } ${
                     isActive
@@ -228,20 +235,45 @@ export function Sidebar() {
                       : 'text-gray-400 hover:bg-dark-hover hover:text-white'
                   }`}
                 >
-                  <span className="relative">
-                    {item.icon}
-                    {showBadge && collapsed && (
-                      <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full" />
-                    )}
-                  </span>
-                  {!collapsed && (
-                    <>
-                      <span className="flex-1 text-left">{item.label}</span>
-                      {showBadge && (
-                        <span className="flex items-center justify-center min-w-[20px] h-5 px-1.5 text-xs font-medium bg-red-500 text-white rounded-full">
-                          {overdueCount}
-                        </span>
+                  <NavLink
+                    to={sectionPath!}
+                    title={collapsed ? item.label : undefined}
+                    className="flex items-center gap-3 flex-1"
+                  >
+                    <span className="relative">
+                      {item.icon}
+                      {showBadge && collapsed && (
+                        <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full" />
                       )}
+                    </span>
+                    {!collapsed && (
+                      <>
+                        <span className="flex-1 text-left">{item.label}</span>
+                        {showBadge && (
+                          <span className="flex items-center justify-center min-w-[20px] h-5 px-1.5 text-xs font-medium bg-red-500 text-white rounded-full">
+                            {overdueCount}
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </NavLink>
+                  {!collapsed && (
+                    <button
+                      onClick={() => {
+                        if (isExpanded) {
+                          // Collapsing
+                          setExpandedSections((prev) => prev.filter((s) => s !== item.label));
+                          // If on a subpage, also navigate home
+                          if (isInSection(item)) {
+                            navigate('/');
+                          }
+                        } else {
+                          // Expanding
+                          setExpandedSections((prev) => [...prev, item.label]);
+                        }
+                      }}
+                      className="p-1 hover:bg-dark-border rounded transition-colors"
+                    >
                       <svg
                         className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
                         fill="none"
@@ -250,9 +282,9 @@ export function Sidebar() {
                       >
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                       </svg>
-                    </>
+                    </button>
                   )}
-                </button>
+                </div>
 
                 {/* Children */}
                 {!collapsed && isExpanded && (

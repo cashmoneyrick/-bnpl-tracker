@@ -7,6 +7,7 @@ import {
   startOfMonth,
   endOfMonth,
   addDays,
+  subDays,
   subMonths,
   differenceInMonths,
 } from 'date-fns';
@@ -19,7 +20,9 @@ import type {
   PlatformUtilization,
   PlatformStats,
   DateRangeOption,
+  LimitChange,
 } from '../types';
+import type { PlatformTier } from '../constants/platforms';
 
 /**
  * Get total amount owed across all platforms
@@ -615,4 +618,433 @@ export function useNextPayment(orderId: string): Payment | null {
 
     return orderPayments[0] || null;
   }, [payments, orderId]);
+}
+
+// ============================================================================
+// NEW ANALYTICS SELECTORS
+// ============================================================================
+
+/**
+ * Get overall on-time payment rate (all platforms, all time)
+ */
+export function useOnTimeRate(): number {
+  const payments = useBNPLStore((state) => state.payments);
+
+  return useMemo(() => {
+    const paidPayments = payments.filter((p) => p.status === 'paid');
+    if (paidPayments.length === 0) return 100; // Default to 100% if no payments
+
+    const onTimeCount = paidPayments.filter((p) => p.paidOnTime === true).length;
+    return Math.round((onTimeCount / paidPayments.length) * 100);
+  }, [payments]);
+}
+
+/**
+ * Get on-time payment rate for a specific platform
+ */
+export function usePlatformOnTimeRate(platformId: PlatformId): number {
+  const payments = useBNPLStore((state) => state.payments);
+
+  return useMemo(() => {
+    const paidPayments = payments.filter(
+      (p) => p.platformId === platformId && p.status === 'paid'
+    );
+    if (paidPayments.length === 0) return 100;
+
+    const onTimeCount = paidPayments.filter((p) => p.paidOnTime === true).length;
+    return Math.round((onTimeCount / paidPayments.length) * 100);
+  }, [payments, platformId]);
+}
+
+/**
+ * Get current consecutive on-time payment streak (all platforms)
+ */
+export function useOnTimeStreak(): number {
+  const payments = useBNPLStore((state) => state.payments);
+
+  return useMemo(() => {
+    // Get all paid payments sorted by paid date (most recent first)
+    const paidPayments = payments
+      .filter((p) => p.status === 'paid' && p.paidDate)
+      .sort((a, b) => {
+        const dateA = parseISO(a.paidDate!);
+        const dateB = parseISO(b.paidDate!);
+        return dateB.getTime() - dateA.getTime();
+      });
+
+    let streak = 0;
+    for (const payment of paidPayments) {
+      if (payment.paidOnTime) {
+        streak++;
+      } else {
+        break;
+      }
+    }
+    return streak;
+  }, [payments]);
+}
+
+/**
+ * Get on-time payment streak for a specific platform
+ */
+export function usePlatformOnTimeStreak(platformId: PlatformId): number {
+  const payments = useBNPLStore((state) => state.payments);
+
+  return useMemo(() => {
+    const paidPayments = payments
+      .filter((p) => p.platformId === platformId && p.status === 'paid' && p.paidDate)
+      .sort((a, b) => {
+        const dateA = parseISO(a.paidDate!);
+        const dateB = parseISO(b.paidDate!);
+        return dateB.getTime() - dateA.getTime();
+      });
+
+    let streak = 0;
+    for (const payment of paidPayments) {
+      if (payment.paidOnTime) {
+        streak++;
+      } else {
+        break;
+      }
+    }
+    return streak;
+  }, [payments, platformId]);
+}
+
+/**
+ * Weekly deployment stats
+ */
+export interface WeeklyDeployment {
+  amount: number;           // Total amount of orders created in last 7 days
+  isOverExtended: boolean;  // True if > $600
+  isWarning: boolean;       // True if $500-600
+  warningThreshold: number; // $500
+  limitThreshold: number;   // $600
+}
+
+/**
+ * Get weekly deployment (orders created in last 7 days)
+ */
+export function useWeeklyDeployment(): WeeklyDeployment {
+  const orders = useBNPLStore((state) => state.orders);
+
+  return useMemo(() => {
+    const now = new Date();
+    const weekAgo = subDays(now, 7);
+
+    const weeklyOrders = orders.filter((o) => {
+      const createdAt = parseISO(o.createdAt);
+      return createdAt >= weekAgo;
+    });
+
+    const amount = weeklyOrders.reduce((sum, o) => sum + o.totalAmount, 0);
+    const warningThreshold = 50000; // $500 in cents
+    const limitThreshold = 60000;   // $600 in cents
+
+    return {
+      amount,
+      isOverExtended: amount > limitThreshold,
+      isWarning: amount >= warningThreshold && amount <= limitThreshold,
+      warningThreshold,
+      limitThreshold,
+    };
+  }, [orders]);
+}
+
+/**
+ * Extended platform utilization with goal progress
+ */
+export interface PlatformUtilizationWithGoal extends PlatformUtilization {
+  goalLimit?: number;
+  goalProgress?: number; // 0-100
+  tier?: PlatformTier;
+}
+
+/**
+ * Get platform utilization with goal progress
+ */
+export function usePlatformUtilizationWithGoal(platformId: PlatformId): PlatformUtilizationWithGoal {
+  const platforms = useBNPLStore((state) => state.platforms);
+  const payments = useBNPLStore((state) => state.payments);
+
+  return useMemo(() => {
+    const platform = platforms.find((p) => p.id === platformId);
+    const limit = platform?.creditLimit ?? 0;
+
+    const used = payments
+      .filter((p) => p.platformId === platformId && p.status !== 'paid')
+      .reduce((sum, p) => sum + p.amount, 0);
+
+    const goalProgress = platform?.goalLimit && platform.goalLimit > 0
+      ? Math.min(100, Math.round((limit / platform.goalLimit) * 100))
+      : undefined;
+
+    return {
+      platformId,
+      used,
+      limit,
+      available: limit - used,
+      percentage: limit > 0 ? (used / limit) * 100 : 0,
+      goalLimit: platform?.goalLimit,
+      goalProgress,
+      tier: platform?.tier,
+    };
+  }, [platforms, payments, platformId]);
+}
+
+/**
+ * Arbitrage order with computed fields
+ */
+export interface ArbitrageOrderWithMetrics extends Order {
+  netCash: number;              // saleAmount - totalAmount (can be negative)
+  costOfCapitalPercent: number; // Cost as percentage of purchase
+  isProfitable: boolean;
+  hasSaleData: boolean;
+}
+
+/**
+ * Get all arbitrage orders with computed metrics
+ */
+export function useArbitrageOrders(): ArbitrageOrderWithMetrics[] {
+  const orders = useBNPLStore((state) => state.orders);
+
+  return useMemo(() => {
+    return orders
+      .filter((o) => o.orderType === 'arbitrage')
+      .map((order) => {
+        const hasSaleData = order.saleAmount !== undefined && order.saleAmount > 0;
+        const netCash = hasSaleData ? (order.saleAmount! - order.totalAmount) : 0;
+        const costOfCapitalPercent = hasSaleData && order.totalAmount > 0
+          ? Math.round(((order.totalAmount - order.saleAmount!) / order.totalAmount) * 1000) / 10
+          : 0;
+        const isProfitable = netCash >= 0;
+
+        return {
+          ...order,
+          netCash,
+          costOfCapitalPercent: Math.max(0, costOfCapitalPercent), // Don't show negative cost
+          isProfitable,
+          hasSaleData,
+        };
+      })
+      .sort((a, b) => parseISO(b.createdAt).getTime() - parseISO(a.createdAt).getTime());
+  }, [orders]);
+}
+
+/**
+ * Aggregate arbitrage statistics
+ */
+export interface ArbitrageStats {
+  totalPurchased: number;       // Sum of all arbitrage order amounts
+  totalSaleAmount: number;      // Sum of all sale amounts
+  totalNetCash: number;         // Total cash generated (can be negative)
+  averageCostOfCapital: number; // Average % cost
+  orderCount: number;
+  pendingSales: number;         // Orders without sale amount
+  completedSales: number;       // Orders with sale amount
+}
+
+/**
+ * Get aggregate arbitrage stats
+ */
+export function useArbitrageStats(): ArbitrageStats {
+  const arbitrageOrders = useArbitrageOrders();
+
+  return useMemo(() => {
+    const totalPurchased = arbitrageOrders.reduce((sum, o) => sum + o.totalAmount, 0);
+    const ordersWithSales = arbitrageOrders.filter((o) => o.hasSaleData);
+    const totalSaleAmount = ordersWithSales.reduce((sum, o) => sum + (o.saleAmount || 0), 0);
+    const totalNetCash = ordersWithSales.reduce((sum, o) => sum + o.netCash, 0);
+
+    const averageCostOfCapital = ordersWithSales.length > 0
+      ? ordersWithSales.reduce((sum, o) => sum + o.costOfCapitalPercent, 0) / ordersWithSales.length
+      : 0;
+
+    return {
+      totalPurchased,
+      totalSaleAmount,
+      totalNetCash,
+      averageCostOfCapital: Math.round(averageCostOfCapital * 10) / 10,
+      orderCount: arbitrageOrders.length,
+      pendingSales: arbitrageOrders.filter((o) => !o.hasSaleData).length,
+      completedSales: ordersWithSales.length,
+    };
+  }, [arbitrageOrders]);
+}
+
+/**
+ * Get limit history for a platform
+ */
+export function useLimitHistory(platformId: PlatformId): LimitChange[] {
+  const limitHistory = useBNPLStore((state) => state.limitHistory);
+
+  return useMemo(() => {
+    return limitHistory
+      .filter((lc) => lc.platformId === platformId)
+      .sort((a, b) => parseISO(a.changedAt).getTime() - parseISO(b.changedAt).getTime());
+  }, [limitHistory, platformId]);
+}
+
+/**
+ * Total limit growth statistics
+ */
+export interface TotalLimitGrowth {
+  startingTotal: number;   // Sum of first recorded limits (or current if no history)
+  currentTotal: number;    // Sum of current limits
+  growthAmount: number;    // Absolute growth
+  growthPercent: number;   // Growth as percentage
+}
+
+/**
+ * Get total limit growth across all platforms
+ */
+export function useTotalLimitGrowth(): TotalLimitGrowth {
+  const platforms = useBNPLStore((state) => state.platforms);
+  const limitHistory = useBNPLStore((state) => state.limitHistory);
+
+  return useMemo(() => {
+    const currentTotal = platforms.reduce((sum, p) => sum + p.creditLimit, 0);
+
+    // Find starting limit for each platform (earliest recorded or current)
+    let startingTotal = 0;
+    for (const platform of platforms) {
+      const platformHistory = limitHistory
+        .filter((lc) => lc.platformId === platform.id)
+        .sort((a, b) => parseISO(a.changedAt).getTime() - parseISO(b.changedAt).getTime());
+
+      if (platformHistory.length > 0) {
+        startingTotal += platformHistory[0].previousLimit;
+      } else {
+        startingTotal += platform.creditLimit;
+      }
+    }
+
+    const growthAmount = currentTotal - startingTotal;
+    const growthPercent = startingTotal > 0
+      ? Math.round((growthAmount / startingTotal) * 100)
+      : 0;
+
+    return {
+      startingTotal,
+      currentTotal,
+      growthAmount,
+      growthPercent,
+    };
+  }, [platforms, limitHistory]);
+}
+
+/**
+ * Platform goal progress
+ */
+export interface PlatformGoalProgress {
+  platform: Platform;
+  currentLimit: number;
+  goalLimit: number;
+  progress: number;    // 0-100
+  remaining: number;   // Cents until goal
+}
+
+/**
+ * Get goal progress for a platform
+ */
+export function usePlatformGoalProgress(platformId: PlatformId): PlatformGoalProgress | null {
+  const platforms = useBNPLStore((state) => state.platforms);
+
+  return useMemo(() => {
+    const platform = platforms.find((p) => p.id === platformId);
+    if (!platform) return null;
+
+    const goalLimit = platform.goalLimit || 0;
+    const progress = goalLimit > 0
+      ? Math.min(100, Math.round((platform.creditLimit / goalLimit) * 100))
+      : 0;
+    const remaining = Math.max(0, goalLimit - platform.creditLimit);
+
+    return {
+      platform,
+      currentLimit: platform.creditLimit,
+      goalLimit,
+      progress,
+      remaining,
+    };
+  }, [platforms, platformId]);
+}
+
+/**
+ * All platforms grouped by tier with goal progress
+ */
+export interface AllPlatformGoals {
+  flexible: PlatformGoalProgress[];
+  limited: PlatformGoalProgress[];
+}
+
+/**
+ * Get all platforms with goal progress, grouped by tier
+ */
+export function useAllPlatformGoals(): AllPlatformGoals {
+  const platforms = useBNPLStore((state) => state.platforms);
+
+  return useMemo(() => {
+    const goals: AllPlatformGoals = {
+      flexible: [],
+      limited: [],
+    };
+
+    for (const platform of platforms) {
+      const goalLimit = platform.goalLimit || 0;
+      const progress = goalLimit > 0
+        ? Math.min(100, Math.round((platform.creditLimit / goalLimit) * 100))
+        : 0;
+      const remaining = Math.max(0, goalLimit - platform.creditLimit);
+
+      const goalProgress: PlatformGoalProgress = {
+        platform,
+        currentLimit: platform.creditLimit,
+        goalLimit,
+        progress,
+        remaining,
+      };
+
+      const tier = platform.tier || 'flexible';
+      if (tier === 'flexible') {
+        goals.flexible.push(goalProgress);
+      } else {
+        goals.limited.push(goalProgress);
+      }
+    }
+
+    return goals;
+  }, [platforms]);
+}
+
+/**
+ * Order breakdown by type
+ */
+export interface OrderTypeBreakdown {
+  necessity: { count: number; total: number };
+  arbitrage: { count: number; total: number };
+  personal: { count: number; total: number };
+}
+
+/**
+ * Get orders grouped by type
+ */
+export function useOrdersByType(): OrderTypeBreakdown {
+  const orders = useBNPLStore((state) => state.orders);
+
+  return useMemo(() => {
+    const breakdown: OrderTypeBreakdown = {
+      necessity: { count: 0, total: 0 },
+      arbitrage: { count: 0, total: 0 },
+      personal: { count: 0, total: 0 },
+    };
+
+    for (const order of orders) {
+      const type = order.orderType || 'personal';
+      breakdown[type].count++;
+      breakdown[type].total += order.totalAmount;
+    }
+
+    return breakdown;
+  }, [orders]);
 }
