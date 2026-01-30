@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { addDays, isSameDay, parseISO, format, getDay } from 'date-fns';
 import { Card } from '../shared/Card';
@@ -30,22 +30,6 @@ export function SummaryCards() {
   const utilizations = useAllPlatformUtilizations();
   const upcomingPayments = useUpcomingPayments(31);
 
-  // Credit modal state
-  const [showCreditModal, setShowCreditModal] = useState(false);
-
-  // Close modal on escape key
-  useEffect(() => {
-    function handleEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        setShowCreditModal(false);
-      }
-    }
-    if (showCreditModal) {
-      document.addEventListener('keydown', handleEscape);
-      return () => document.removeEventListener('keydown', handleEscape);
-    }
-  }, [showCreditModal]);
-
   // Filter platforms with credit limit > 0, sort by leverage (available/used)
   const platformCredits = utilizations
     .filter((u) => u.limit > 0)
@@ -61,11 +45,6 @@ export function SummaryCards() {
       const scoreB = b.available / (b.used || 1);
       return scoreB - scoreA;
     });
-
-  const totalAvailable = platformCredits.reduce((sum, p) => sum + p.available, 0);
-  const totalLimit = platformCredits.reduce((sum, p) => sum + p.limit, 0);
-  const totalUsed = platformCredits.reduce((sum, p) => sum + p.used, 0);
-  const overallPercentage = totalLimit > 0 ? (totalUsed / totalLimit) * 100 : 0;
 
   // Color based on utilization percentage - semantic colors
   const getUtilizationColor = (pct: number) => {
@@ -109,10 +88,7 @@ export function SummaryCards() {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       {/* Credit Leverage Card - Merged Total Owed + Available Credit */}
-      <Card
-        className="cursor-pointer hover:bg-dark-hover/50 transition-colors"
-        onClick={() => platformCredits.length > 0 && setShowCreditModal(true)}
-      >
+      <Card>
         {/* Total Owed Section */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex-1">
@@ -137,12 +113,23 @@ export function SummaryCards() {
 
         {/* Platform Breakdown */}
         {platformCredits.length > 0 && (
-          <>
-            <div className="border-t border-dark-border pt-3">
-              <p className="text-xs text-gray-500 mb-2">By Platform</p>
-              <div className="space-y-2">
-                {platformCredits.slice(0, 3).map(({ platform, used, limit, percentage }) => (
-                  <div key={platform.id} className="flex items-center justify-between">
+          <div className="border-t border-dark-border pt-3">
+            <p className="text-xs text-gray-500 mb-2">By Platform</p>
+
+            {/* Column Headers */}
+            <div className="grid grid-cols-[1fr_5rem_4rem_4rem_3rem] gap-2 items-center text-[10px] mb-2">
+              <span></span>
+              <span className="text-center text-green-400">Left to Spend</span>
+              <span className="text-center text-red-400">Spent</span>
+              <span className="text-center text-gray-400">Limit</span>
+              <span className="text-center text-gray-400">Usage</span>
+            </div>
+
+            {/* Platform Rows */}
+            <div className="space-y-3">
+              {platformCredits.map(({ platform, used, available, limit, percentage }) => (
+                <div key={platform.id}>
+                  <div className="grid grid-cols-[1fr_5rem_4rem_4rem_3rem] gap-2 items-center mb-1">
                     <div className="flex items-center gap-2">
                       <span
                         className="w-2 h-2 rounded-full"
@@ -150,147 +137,47 @@ export function SummaryCards() {
                       />
                       <span className="text-sm text-white">{platform.name}</span>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-400">
-                        {formatCurrency(used)} / {formatCurrency(limit)}
-                      </span>
-                      <span
-                        className="text-xs font-medium w-8 text-right"
-                        style={{ color: getUtilizationColor(percentage) }}
-                      >
-                        {Math.round(percentage)}%
-                      </span>
-                    </div>
+                    <span className="px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 text-xs text-center">
+                      {formatCurrency(available)}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 text-xs text-center">
+                      {formatCurrency(used)}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-gray-500/20 text-gray-400 text-xs text-center">
+                      {formatCurrency(limit)}
+                    </span>
+                    <span
+                      className="px-2 py-0.5 rounded-full text-xs font-medium text-center"
+                      style={{
+                        backgroundColor: `${getUtilizationColor(percentage)}20`,
+                        color: getUtilizationColor(percentage),
+                      }}
+                    >
+                      {Math.round(percentage)}%
+                    </span>
                   </div>
-                ))}
-                {platformCredits.length > 3 && (
-                  <p className="text-xs text-gray-500 text-center">
-                    +{platformCredits.length - 3} more
-                  </p>
-                )}
-              </div>
+                  <div className="h-1.5 bg-dark-bg rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all"
+                      style={{
+                        width: `${Math.min(percentage, 100)}%`,
+                        backgroundColor: getUtilizationColor(percentage),
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
             </div>
-            <p className="text-xs text-gray-500 mt-3 text-center">Click for details</p>
-          </>
+
+            <button
+              onClick={() => navigate('/settings')}
+              className="w-full mt-4 pt-3 text-xs text-blue-400 hover:text-blue-300 transition-colors border-t border-dark-border"
+            >
+              Manage Credit Limits
+            </button>
+          </div>
         )}
       </Card>
-
-      {/* Credit Details Modal */}
-      {showCreditModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
-          onClick={() => setShowCreditModal(false)}
-        >
-          <div
-            className="bg-dark-card border border-dark-border rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] overflow-hidden animate-scale-in"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Modal Header */}
-            <div className="flex items-center justify-between p-4 border-b border-dark-border">
-              <h2 className="text-lg font-semibold text-white">Credit Overview</h2>
-              <button
-                onClick={() => setShowCreditModal(false)}
-                className="p-1 text-gray-400 hover:text-white transition-colors"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            {/* Summary Stats */}
-            <div className="grid grid-cols-3 gap-4 p-4 bg-dark-hover/30 border-b border-dark-border">
-              <div className="text-center">
-                <p className="text-xs text-gray-500 mb-1">Total Limit</p>
-                <p className="text-lg font-bold text-white">{formatCurrency(totalLimit)}</p>
-              </div>
-              <div className="text-center">
-                <p className="text-xs text-gray-500 mb-1">Used</p>
-                <p className="text-lg font-bold text-white">{formatCurrency(totalUsed)}</p>
-                <p className="text-xs text-gray-400">{Math.round(overallPercentage)}%</p>
-              </div>
-              <div className="text-center">
-                <p className="text-xs text-gray-500 mb-1">Available</p>
-                <p className="text-lg font-bold text-green-400">{formatCurrency(totalAvailable)}</p>
-                <p className="text-xs text-gray-400">{Math.round(100 - overallPercentage)}%</p>
-              </div>
-            </div>
-
-            {/* Platform Details */}
-            <div className="p-4 overflow-y-auto max-h-[50vh]">
-              <h3 className="text-sm font-medium text-gray-400 mb-3">By Platform</h3>
-              <div className="space-y-4">
-                {platformCredits.map(({ platform, used, available, limit, percentage }) => (
-                  <div key={platform.id} className="bg-dark-hover/30 rounded-lg p-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <span
-                          className="w-3 h-3 rounded-full"
-                          style={{ backgroundColor: platform.color }}
-                        />
-                        <span className="font-medium text-white">{platform.name}</span>
-                      </div>
-                      <span className="text-sm text-gray-400">
-                        Limit: {formatCurrency(limit)}
-                      </span>
-                    </div>
-
-                    {/* Progress Bar */}
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="flex-1 h-2 bg-dark-bg rounded-full overflow-hidden">
-                        <div
-                          className="h-full rounded-full transition-all"
-                          style={{
-                            width: `${Math.min(percentage, 100)}%`,
-                            backgroundColor: getUtilizationColor(percentage),
-                          }}
-                        />
-                      </div>
-                      <span
-                        className="text-sm font-medium w-12 text-right"
-                        style={{ color: getUtilizationColor(percentage) }}
-                      >
-                        {Math.round(percentage)}%
-                      </span>
-                    </div>
-
-                    {/* Used / Available Row */}
-                    <div className="grid grid-cols-2 gap-3 text-sm">
-                      <div className="flex justify-between items-center bg-dark-bg/50 rounded px-2 py-1.5">
-                        <span className="text-gray-500">Used</span>
-                        <div className="text-right">
-                          <span className="text-white font-medium">{formatCurrency(used)}</span>
-                          <span className="text-gray-500 ml-1">({Math.round(percentage)}%)</span>
-                        </div>
-                      </div>
-                      <div className="flex justify-between items-center bg-dark-bg/50 rounded px-2 py-1.5">
-                        <span className="text-gray-500">Left</span>
-                        <div className="text-right">
-                          <span className="text-green-400 font-medium">{formatCurrency(available)}</span>
-                          <span className="text-gray-500 ml-1">({Math.round(100 - percentage)}%)</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Modal Footer */}
-            <div className="p-4 border-t border-dark-border">
-              <button
-                onClick={() => {
-                  setShowCreditModal(false);
-                  navigate('/settings');
-                }}
-                className="w-full py-2 text-sm text-blue-400 hover:text-blue-300 transition-colors"
-              >
-                Manage Credit Limits
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* This Month Card with Mini Calendar */}
       <Card className="cursor-pointer hover:bg-dark-hover/50 transition-colors">
