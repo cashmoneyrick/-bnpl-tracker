@@ -26,7 +26,7 @@ export function Layout({ children }: LayoutProps) {
 
   // Update document title
   useEffect(() => {
-    document.title = `BNPL Tracker — ${formatCurrency(totalOwed)} owed`;
+    document.title = `Journal — ${formatCurrency(totalOwed)} owed`;
   }, [totalOwed]);
 
   // Keyboard shortcut for Quick Add

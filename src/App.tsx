@@ -4,6 +4,7 @@ import { ErrorBoundary } from './components/shared/ErrorBoundary';
 import { ToastProvider } from './components/shared/Toast';
 import { QuickAddModal } from './components/modals/QuickAddModal';
 import { OrderDetailModal } from './components/modals/OrderDetailModal';
+import { HomePage } from './pages/HomePage';
 import { DashboardPage } from './pages/DashboardPage';
 import { CalendarPage } from './pages/CalendarPage';
 import { OrdersPage } from './pages/OrdersPage';
@@ -19,11 +20,12 @@ function App() {
           <ErrorBoundary>
             <Layout>
               <Routes>
-                <Route path="/" element={<DashboardPage />} />
-                <Route path="/orders" element={<OrdersPage />} />
-                <Route path="/calendar" element={<CalendarPage />} />
-                <Route path="/analytics" element={<AnalyticsPage />} />
-                <Route path="/history" element={<HistoryPage />} />
+                <Route path="/" element={<HomePage />} />
+                <Route path="/budgeting" element={<DashboardPage />} />
+                <Route path="/budgeting/orders" element={<OrdersPage />} />
+                <Route path="/budgeting/calendar" element={<CalendarPage />} />
+                <Route path="/budgeting/analytics" element={<AnalyticsPage />} />
+                <Route path="/budgeting/history" element={<HistoryPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
               </Routes>
             </Layout>
