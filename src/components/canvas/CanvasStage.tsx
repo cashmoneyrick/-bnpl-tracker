@@ -103,8 +103,10 @@ export function CanvasStage({ width, height, stageRef: externalStageRef }: Canva
   // Handle mouse down
   const handleMouseDown = useCallback(
     (e: KonvaEventObject<MouseEvent>) => {
+      const currentTool = useCanvasStore.getState().activeTool;
+
       // Pan with middle mouse button, pan tool, or spacebar held
-      if (e.evt.button === 1 || activeTool === 'pan' || isSpacebarPanning) {
+      if (e.evt.button === 1 || currentTool === 'pan' || isSpacebarPanning) {
         setIsPanning(true);
         e.evt.preventDefault();
         return;
@@ -128,8 +130,8 @@ export function CanvasStage({ width, height, stageRef: externalStageRef }: Canva
         return;
       }
 
-      // Text creation
-      if (isTextTool) {
+      // Text creation - read fresh state to avoid stale closure
+      if (useCanvasStore.getState().activeTool === 'text') {
         handleTextStart(e);
         return;
       }
@@ -362,7 +364,7 @@ export function CanvasStage({ width, height, stageRef: externalStageRef }: Canva
             width={width}
             height={height}
             gridSize={gridSettings.size}
-            gridColor={isLightMode ? '#d0d0d0' : gridSettings.gridColor}
+            gridColor={isLightMode ? '#aaaaaa' : gridSettings.gridColor}
             viewport={viewport}
           />
         </Layer>

@@ -6,12 +6,10 @@ import type { TextElement } from '../../../types/canvas';
 
 export function useText(stageRef: React.RefObject<Stage | null>) {
   const textState = useCanvasStore((state) => state.textCreationState);
-  const startTextCreation = useCanvasStore((state) => state.startTextCreation);
   const cancelTextCreation = useCanvasStore((state) => state.cancelTextCreation);
 
   const activeTool = useCanvasStore((state) => state.activeTool);
   const toolSettings = useCanvasStore((state) => state.toolSettings);
-  const viewport = useCanvasStore((state) => state.viewport);
   const gridSettings = useCanvasStore((state) => state.gridSettings);
   const addElement = useCanvasStore((state) => state.addElement);
 
@@ -25,7 +23,11 @@ export function useText(stageRef: React.RefObject<Stage | null>) {
 
   const handleTextStart = useCallback(
     (e: KonvaEventObject<MouseEvent | TouchEvent>) => {
-      if (activeTool !== 'text') return;
+      // Read fresh state to avoid stale closure issues
+      const currentTool = useCanvasStore.getState().activeTool;
+      const currentViewport = useCanvasStore.getState().viewport;
+
+      if (currentTool !== 'text') return;
       if (e.evt.type === 'mousedown' && (e.evt as MouseEvent).button !== 0) return;
 
       const stage = stageRef.current;
@@ -35,8 +37,8 @@ export function useText(stageRef: React.RefObject<Stage | null>) {
       if (!pointer) return;
 
       // Convert to canvas coordinates
-      const canvasX = snapToGrid((pointer.x - viewport.x) / viewport.scale);
-      const canvasY = snapToGrid((pointer.y - viewport.y) / viewport.scale);
+      const canvasX = snapToGrid((pointer.x - currentViewport.x) / currentViewport.scale);
+      const canvasY = snapToGrid((pointer.y - currentViewport.y) / currentViewport.scale);
 
       // Get screen coordinates for the input overlay
       const container = stage.container();
@@ -44,14 +46,15 @@ export function useText(stageRef: React.RefObject<Stage | null>) {
       const screenX = rect.left + pointer.x;
       const screenY = rect.top + pointer.y;
 
-      startTextCreation({
+      // Call directly from store to avoid stale closure
+      useCanvasStore.getState().startTextCreation({
         x: canvasX,
         y: canvasY,
         screenX,
         screenY,
       });
     },
-    [activeTool, stageRef, viewport, snapToGrid, startTextCreation]
+    [stageRef, snapToGrid]
   );
 
   const handleTextComplete = useCallback(

@@ -255,10 +255,10 @@ export type CanvasAction =
 
 export const DEFAULT_GRID_SETTINGS: GridSettings = {
   enabled: true,
-  size: 20,
+  size: 50,
   snapToGrid: true,
   showGrid: true,
-  gridColor: '#404040',
+  gridColor: '#555555',
 };
 
 export const DEFAULT_TOOL_SETTINGS: ToolSettings = {
