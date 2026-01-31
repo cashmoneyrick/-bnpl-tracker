@@ -26,6 +26,8 @@ export function OrderDetailModal() {
 
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showPaymentDeleteConfirm, setShowPaymentDeleteConfirm] = useState(false);
+  const [pendingDeletePaymentId, setPendingDeletePaymentId] = useState<string | null>(null);
 
   // Inline editing states
   const [editingOrderInfo, setEditingOrderInfo] = useState(false);
@@ -327,10 +329,18 @@ export function OrderDetailModal() {
     }
   };
 
-  const handleDeletePayment = async (paymentId: string) => {
+  const handleDeletePaymentClick = (paymentId: string) => {
+    setPendingDeletePaymentId(paymentId);
+    setShowPaymentDeleteConfirm(true);
+  };
+
+  const handleConfirmDeletePayment = async () => {
+    if (!pendingDeletePaymentId) return;
     try {
-      await deletePayment(paymentId);
+      await deletePayment(pendingDeletePaymentId);
       showToast('Payment deleted', 'success');
+      setShowPaymentDeleteConfirm(false);
+      setPendingDeletePaymentId(null);
     } catch (error) {
       console.error('Failed to delete payment:', error);
       showToast('Failed to delete payment', 'error');
@@ -866,7 +876,7 @@ export function OrderDetailModal() {
                         </svg>
                       </button>
                       <button
-                        onClick={() => handleDeletePayment(payment.id)}
+                        onClick={() => handleDeletePaymentClick(payment.id)}
                         className="p-1 text-red-400 hover:text-red-300 transition-colors"
                         title="Delete payment"
                       >
@@ -1077,6 +1087,40 @@ export function OrderDetailModal() {
             </Button>
             <Button variant="danger" onClick={handleConfirmDelete} disabled={isDeleting}>
               {isDeleting ? 'Deleting...' : 'Delete Order'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Payment Delete Confirmation Modal */}
+      <Modal
+        isOpen={showPaymentDeleteConfirm}
+        onClose={() => {
+          setShowPaymentDeleteConfirm(false);
+          setPendingDeletePaymentId(null);
+        }}
+        title="Delete Payment"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+            <p className="text-red-400 text-sm font-medium">Warning</p>
+            <p className="text-gray-300 text-sm mt-1">
+              This will permanently delete this payment and adjust the order total. This cannot be undone.
+            </p>
+          </div>
+          <div className="flex justify-end gap-3">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setShowPaymentDeleteConfirm(false);
+                setPendingDeletePaymentId(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button variant="danger" onClick={handleConfirmDeletePayment}>
+              Delete Payment
             </Button>
           </div>
         </div>

@@ -20,22 +20,24 @@ type StoreName = keyof DBSchema;
 class StorageService {
   private db: IDBDatabase | null = null;
   private initPromise: Promise<void> | null = null;
+  private isImporting: boolean = false; // Flag to prevent recursive backup restore
 
   // localStorage backup methods
   private saveBackup(): void {
-    try {
-      if (!this.db) return;
+    if (!this.db) return;
 
-      // Get all data and save to localStorage
-      this.exportData().then((data) => {
+    // Get all data and save to localStorage
+    this.exportData().then((data) => {
+      try {
         localStorage.setItem(BACKUP_KEY, JSON.stringify(data));
-        console.log('[Storage] Backup saved to localStorage', new Date().toISOString());
-      }).catch((err) => {
-        console.warn('[Storage] Failed to create backup:', err);
-      });
-    } catch (err) {
-      console.warn('[Storage] localStorage backup failed:', err);
-    }
+        console.log('[Storage] Backup saved to localStorage');
+      } catch (err) {
+        // localStorage.setItem can throw QuotaExceededError
+        console.error('[Storage] Backup failed - localStorage quota may be exceeded:', err);
+      }
+    }).catch((err) => {
+      console.error('[Storage] Failed to export data for backup:', err);
+    });
   }
 
   private getBackup(): ExportedData | null {
@@ -124,7 +126,8 @@ class StorageService {
     ]);
 
     // If IndexedDB is empty, try to restore from localStorage backup
-    if (orders.length === 0 && payments.length === 0 && platforms.length === 0) {
+    // Skip this during import to prevent recursive restore loop
+    if (!this.isImporting && orders.length === 0 && payments.length === 0 && platforms.length === 0) {
       const backup = this.getBackup();
       if (backup && (backup.orders.length > 0 || backup.payments.length > 0)) {
         console.log('[Storage] IndexedDB empty, restoring from localStorage backup...');
@@ -196,6 +199,11 @@ class StorageService {
     triggerBackup: boolean = true
   ): Promise<void> {
     await this.init();
+    // Check if store exists (for backwards compatibility with older databases)
+    if (!this.db?.objectStoreNames.contains(storeName)) {
+      console.warn(`[Storage] Store '${storeName}' does not exist, skipping save`);
+      return;
+    }
     return new Promise((resolve, reject) => {
       const store = this.getStore(storeName, 'readwrite');
       const request = store.put(item);
@@ -305,10 +313,15 @@ class StorageService {
   async deleteOrder(id: string): Promise<void> {
     // Also delete associated payments
     const payments = await this.getPaymentsByOrder(id);
-    for (const payment of payments) {
-      await this.delete('payments', payment.id);
+    try {
+      for (const payment of payments) {
+        await this.delete('payments', payment.id);
+      }
+      await this.delete('orders', id);
+    } catch (error) {
+      console.error('[Storage] deleteOrder failed:', error);
+      throw error; // Re-throw so caller knows it failed
     }
-    return this.delete('orders', id);
   }
 
   async getOrdersByPlatform(platformId: string): Promise<Order[]> {
@@ -473,27 +486,37 @@ class StorageService {
       throw new Error('Invalid data: payments must be an array');
     }
 
-    // Clear the localStorage backup FIRST to prevent recursive restore loop
-    // (clearAllData -> initializeDefaults -> importData from backup -> loop)
-    localStorage.removeItem(BACKUP_KEY);
-
-    // Clear existing data
-    await this.clearAllData();
-
-    // Use batch operations for better performance
-    // This uses a single IndexedDB transaction per store instead of one per item
-    await this.batchPut('platforms', data.platforms || []);
-    await this.batchPut('subscriptions', data.subscriptions || []);
-    await this.batchPut('orders', data.orders);
-    await this.batchPut('payments', data.payments);
-
-    // Import limit history (v2+)
-    if (data.limitHistory && data.limitHistory.length > 0) {
-      await this.batchPut('limitHistory', data.limitHistory);
+    // Validate referential integrity - check that all payments reference valid orders
+    const orderIds = new Set(data.orders.map(o => o.id));
+    const orphanedPayments = data.payments.filter(p => !orderIds.has(p.orderId));
+    if (orphanedPayments.length > 0) {
+      throw new Error(`Import contains ${orphanedPayments.length} payment(s) referencing non-existent orders`);
     }
 
-    // Save backup after successful import
-    this.saveBackup();
+    // Set flag to prevent recursive backup restore during import
+    this.isImporting = true;
+
+    try {
+      // Clear existing data (backup is preserved until import succeeds)
+      await this.clearAllData();
+
+      // Use batch operations for better performance
+      await this.batchPut('platforms', data.platforms || []);
+      await this.batchPut('subscriptions', data.subscriptions || []);
+      await this.batchPut('orders', data.orders);
+      await this.batchPut('payments', data.payments);
+
+      // Import limit history (v2+)
+      if (data.limitHistory && data.limitHistory.length > 0) {
+        await this.batchPut('limitHistory', data.limitHistory);
+      }
+
+      // Only clear old backup after successful import, then create new backup
+      localStorage.removeItem(BACKUP_KEY);
+      this.saveBackup();
+    } finally {
+      this.isImporting = false;
+    }
   }
 
   async clearAllData(): Promise<void> {

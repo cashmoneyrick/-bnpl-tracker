@@ -2,6 +2,54 @@ import { Shape } from 'react-konva';
 import type { Context } from 'konva/lib/Context';
 import type { MindMapNodeElement } from '../../../types/canvas';
 
+// Smart edge detection - determines best connection points based on relative node positions
+function getConnectionPoints(fromNode: MindMapNodeElement, toNode: MindMapNodeElement) {
+  const fromCenterX = fromNode.x + fromNode.width / 2;
+  const fromCenterY = fromNode.y + fromNode.height / 2;
+  const toCenterX = toNode.x + toNode.width / 2;
+  const toCenterY = toNode.y + toNode.height / 2;
+
+  // Determine direction of connection
+  const dx = toCenterX - fromCenterX;
+  const dy = toCenterY - fromCenterY;
+
+  let fromX: number, fromY: number, toX: number, toY: number;
+  let isHorizontal: boolean;
+
+  // Choose connection points based on relative positions
+  if (Math.abs(dx) > Math.abs(dy)) {
+    // Horizontal connection (left-right)
+    isHorizontal = true;
+    if (dx > 0) {
+      // Child is to the right
+      fromX = fromNode.x + fromNode.width;
+      toX = toNode.x;
+    } else {
+      // Child is to the left
+      fromX = fromNode.x;
+      toX = toNode.x + toNode.width;
+    }
+    fromY = fromNode.y + fromNode.height / 2;
+    toY = toNode.y + toNode.height / 2;
+  } else {
+    // Vertical connection (top-bottom)
+    isHorizontal = false;
+    if (dy > 0) {
+      // Child is below
+      fromY = fromNode.y + fromNode.height;
+      toY = toNode.y;
+    } else {
+      // Child is above
+      fromY = fromNode.y;
+      toY = toNode.y + toNode.height;
+    }
+    fromX = fromNode.x + fromNode.width / 2;
+    toX = toNode.x + toNode.width / 2;
+  }
+
+  return { fromX, fromY, toX, toY, isHorizontal };
+}
+
 interface MindMapConnectionProps {
   fromNode: MindMapNodeElement;
   toNode: MindMapNodeElement;
@@ -15,17 +63,12 @@ export function MindMapConnection({
   stroke = '#3b82f6',
   strokeWidth = 2,
 }: MindMapConnectionProps) {
-  // Calculate connection points
-  // From: right side of parent node
-  // To: left side of child node
-  const fromX = fromNode.x + fromNode.width;
-  const fromY = fromNode.y + fromNode.height / 2;
-  const toX = toNode.x;
-  const toY = toNode.y + toNode.height / 2;
+  // Calculate smart connection points based on relative positions
+  const { fromX, fromY, toX, toY, isHorizontal } = getConnectionPoints(fromNode, toNode);
 
   // Calculate control points for smooth Bezier curve
-  const dx = toX - fromX;
-  const controlPointOffset = Math.min(Math.abs(dx) / 2, 80);
+  const distance = isHorizontal ? Math.abs(toX - fromX) : Math.abs(toY - fromY);
+  const controlPointOffset = Math.min(distance / 2, 80);
 
   return (
     <Shape
@@ -33,12 +76,22 @@ export function MindMapConnection({
         context.beginPath();
         context.moveTo(fromX, fromY);
 
-        // Cubic Bezier curve
-        context.bezierCurveTo(
-          fromX + controlPointOffset, fromY,  // First control point
-          toX - controlPointOffset, toY,      // Second control point
-          toX, toY                             // End point
-        );
+        // Cubic Bezier curve with dynamic control points
+        if (isHorizontal) {
+          const direction = toX > fromX ? 1 : -1;
+          context.bezierCurveTo(
+            fromX + controlPointOffset * direction, fromY,  // First control point
+            toX - controlPointOffset * direction, toY,      // Second control point
+            toX, toY                                         // End point
+          );
+        } else {
+          const direction = toY > fromY ? 1 : -1;
+          context.bezierCurveTo(
+            fromX, fromY + controlPointOffset * direction,  // First control point
+            toX, toY - controlPointOffset * direction,      // Second control point
+            toX, toY                                         // End point
+          );
+        }
 
         context.strokeShape(shape);
       }}

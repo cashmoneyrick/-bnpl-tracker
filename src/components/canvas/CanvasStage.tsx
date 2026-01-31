@@ -36,6 +36,7 @@ export function CanvasStage({ width, height, stageRef: externalStageRef }: Canva
   const setIsPanning = useCanvasStore((state) => state.setIsPanning);
   const isSpacebarPanning = useCanvasStore((state) => state.isSpacebarPanning);
   const gridSettings = useCanvasStore((state) => state.gridSettings);
+  const isLightMode = useCanvasStore((state) => state.isLightMode);
   const elements = useCanvasStore((state) => state.elements);
   const selectedElementIds = useCanvasStore((state) => state.selectedElementIds);
   const selectElements = useCanvasStore((state) => state.selectElements);
@@ -352,7 +353,7 @@ export function CanvasStage({ width, height, stageRef: externalStageRef }: Canva
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
-      style={{ cursor: getCursor(), backgroundColor: '#0a0a0a' }}
+      style={{ cursor: getCursor(), backgroundColor: isLightMode ? '#f5f5f5' : '#0a0a0a' }}
     >
       {/* Grid Layer */}
       {gridSettings.showGrid && (
@@ -361,7 +362,7 @@ export function CanvasStage({ width, height, stageRef: externalStageRef }: Canva
             width={width}
             height={height}
             gridSize={gridSettings.size}
-            gridColor={gridSettings.gridColor}
+            gridColor={isLightMode ? '#d0d0d0' : gridSettings.gridColor}
             viewport={viewport}
           />
         </Layer>

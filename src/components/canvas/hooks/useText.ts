@@ -1,25 +1,13 @@
-import { useState, useCallback } from 'react';
+import { useCallback } from 'react';
 import type { Stage } from 'konva/lib/Stage';
 import type { KonvaEventObject } from 'konva/lib/Node';
 import { useCanvasStore } from '../../../store/canvasStore';
 import type { TextElement } from '../../../types/canvas';
 
-interface TextCreationState {
-  isCreating: boolean;
-  x: number;
-  y: number;
-  screenX: number;
-  screenY: number;
-}
-
 export function useText(stageRef: React.RefObject<Stage | null>) {
-  const [textState, setTextState] = useState<TextCreationState>({
-    isCreating: false,
-    x: 0,
-    y: 0,
-    screenX: 0,
-    screenY: 0,
-  });
+  const textState = useCanvasStore((state) => state.textCreationState);
+  const startTextCreation = useCanvasStore((state) => state.startTextCreation);
+  const cancelTextCreation = useCanvasStore((state) => state.cancelTextCreation);
 
   const activeTool = useCanvasStore((state) => state.activeTool);
   const toolSettings = useCanvasStore((state) => state.toolSettings);
@@ -56,27 +44,20 @@ export function useText(stageRef: React.RefObject<Stage | null>) {
       const screenX = rect.left + pointer.x;
       const screenY = rect.top + pointer.y;
 
-      setTextState({
-        isCreating: true,
+      startTextCreation({
         x: canvasX,
         y: canvasY,
         screenX,
         screenY,
       });
     },
-    [activeTool, stageRef, viewport, snapToGrid]
+    [activeTool, stageRef, viewport, snapToGrid, startTextCreation]
   );
 
   const handleTextComplete = useCallback(
     (text: string) => {
       if (!text.trim()) {
-        setTextState({
-          isCreating: false,
-          x: 0,
-          y: 0,
-          screenX: 0,
-          screenY: 0,
-        });
+        cancelTextCreation();
         return;
       }
 
@@ -100,27 +81,14 @@ export function useText(stageRef: React.RefObject<Stage | null>) {
       };
 
       addElement(textElement);
-
-      setTextState({
-        isCreating: false,
-        x: 0,
-        y: 0,
-        screenX: 0,
-        screenY: 0,
-      });
+      cancelTextCreation();
     },
-    [textState.x, textState.y, toolSettings.text, addElement]
+    [textState.x, textState.y, toolSettings.text, addElement, cancelTextCreation]
   );
 
   const handleTextCancel = useCallback(() => {
-    setTextState({
-      isCreating: false,
-      x: 0,
-      y: 0,
-      screenX: 0,
-      screenY: 0,
-    });
-  }, []);
+    cancelTextCreation();
+  }, [cancelTextCreation]);
 
   return {
     textState,

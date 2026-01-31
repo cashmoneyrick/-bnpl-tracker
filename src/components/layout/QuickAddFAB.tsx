@@ -1,7 +1,14 @@
+import { useLocation } from 'react-router-dom';
 import { useBNPLStore } from '../../store';
 
 export function QuickAddFAB() {
+  const location = useLocation();
   const openQuickAddModal = useBNPLStore((state) => state.openQuickAddModal);
+
+  // Hide on canvas page - it has its own toolbar
+  if (location.pathname === '/canvas') {
+    return null;
+  }
 
   return (
     <button

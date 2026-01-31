@@ -1,12 +1,12 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useCallback } from 'react';
 import type { Stage } from 'konva/lib/Stage';
 import { CanvasStage } from './CanvasStage';
 import { CanvasToolbar } from './toolbar/CanvasToolbar';
 import { TextCreator } from './elements/TextElement';
 import { useImageUpload } from './hooks/useImageUpload';
-import { useText } from './hooks/useText';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useCanvasStore } from '../../store/canvasStore';
+import type { TextElement } from '../../types/canvas';
 
 export function Canvas() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -19,10 +19,51 @@ export function Canvas() {
   const resetZoom = useCanvasStore((state) => state.resetZoom);
   const gridSettings = useCanvasStore((state) => state.gridSettings);
   const toggleGrid = useCanvasStore((state) => state.toggleGrid);
+  const isLightMode = useCanvasStore((state) => state.isLightMode);
+  const toggleLightMode = useCanvasStore((state) => state.toggleLightMode);
+  const centerView = useCanvasStore((state) => state.centerView);
   const activeTool = useCanvasStore((state) => state.activeTool);
+  const textCreationState = useCanvasStore((state) => state.textCreationState);
+  const cancelTextCreation = useCanvasStore((state) => state.cancelTextCreation);
+  const toolSettings = useCanvasStore((state) => state.toolSettings);
+  const addElement = useCanvasStore((state) => state.addElement);
 
-  // Text creation hook
-  const { textState, handleTextComplete, handleTextCancel, textSettings } = useText(stageRef);
+  // Text creation handlers
+  const handleTextComplete = useCallback(
+    (text: string) => {
+      if (!text.trim()) {
+        cancelTextCreation();
+        return;
+      }
+
+      const textElement: Omit<TextElement, 'id' | 'createdAt' | 'updatedAt' | 'zIndex'> = {
+        type: 'text',
+        x: textCreationState.x,
+        y: textCreationState.y,
+        text: text.trim(),
+        fontSize: toolSettings.text.fontSize,
+        fontFamily: toolSettings.text.fontFamily,
+        fontStyle: 'normal',
+        fill: toolSettings.text.color,
+        align: 'left',
+        padding: 4,
+        rotation: 0,
+        scaleX: 1,
+        scaleY: 1,
+        opacity: 1,
+        visible: true,
+        locked: false,
+      };
+
+      addElement(textElement);
+      cancelTextCreation();
+    },
+    [textCreationState.x, textCreationState.y, toolSettings.text, addElement, cancelTextCreation]
+  );
+
+  const handleTextCancel = useCallback(() => {
+    cancelTextCreation();
+  }, [cancelTextCreation]);
 
   // Image upload hook
   const { openFilePicker } = useImageUpload(stageRef, containerRef);
@@ -60,13 +101,13 @@ export function Canvas() {
         />
 
         {/* Text Creator Overlay */}
-        {textState.isCreating && (
+        {textCreationState.isCreating && (
           <TextCreator
-            x={textState.screenX}
-            y={textState.screenY}
+            x={textCreationState.screenX}
+            y={textCreationState.screenY}
             onComplete={handleTextComplete}
             onCancel={handleTextCancel}
-            settings={textSettings}
+            settings={toolSettings.text}
           />
         )}
 
@@ -136,6 +177,40 @@ export function Canvas() {
               />
             </svg>
             <span className="text-sm">Grid</span>
+          </button>
+
+          {/* Light Mode Toggle */}
+          <button
+            onClick={toggleLightMode}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-colors ${
+              isLightMode
+                ? 'bg-amber-500/20 border-amber-500/50 text-amber-400'
+                : 'bg-dark-card border-dark-border text-gray-400 hover:text-white'
+            }`}
+            title="Toggle Light Mode"
+          >
+            {isLightMode ? (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+              </svg>
+            )}
+            <span className="text-sm">{isLightMode ? 'Light' : 'Dark'}</span>
+          </button>
+
+          {/* Center View Button */}
+          <button
+            onClick={() => centerView(dimensions.width, dimensions.height)}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg border bg-dark-card border-dark-border text-gray-400 hover:text-white transition-colors"
+            title="Center View on Content"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
+            </svg>
+            <span className="text-sm">Center</span>
           </button>
         </div>
       </div>

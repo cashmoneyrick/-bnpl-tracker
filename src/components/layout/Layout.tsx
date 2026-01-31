@@ -72,7 +72,7 @@ export function Layout({ children }: LayoutProps) {
   return (
     <div className="flex min-h-screen bg-dark-bg">
       <Sidebar />
-      <main className="flex-1 overflow-auto">
+      <main className="flex-1 overflow-auto relative">
         <div className="p-8">{children}</div>
       </main>
       <QuickAddFAB />

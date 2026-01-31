@@ -42,29 +42,83 @@ export function SummaryCards() {
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
-      {/* Credit Leverage Card - Merged Total Owed + Available Credit */}
+      {/* Credit Leverage Card */}
       <Card>
-        {/* Total Owed Section */}
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex-1">
-            <p className="text-sm text-gray-400">Credit Leverage</p>
-            <p className="text-2xl font-bold text-white mt-1">
-              {formatCurrency(totalOwed)}
-            </p>
-            <p className="text-xs text-gray-500 mt-1">
-              {creditUtilization.limit > 0
-                ? `of ${formatCurrency(creditUtilization.limit)} limit`
-                : 'No credit limits set'}
-            </p>
+        <p className="text-sm text-gray-400 mb-4">Credit Leverage</p>
+
+        {creditUtilization.limit > 0 ? (
+          <>
+            {/* Main Display - Ring with Stats on sides */}
+            <div className="flex items-center justify-between gap-4 mb-5">
+              {/* Left Side - Available */}
+              <div className="flex-1 text-center">
+                <p className="text-xs text-gray-500 mb-1">Available</p>
+                <p className="text-xl font-bold text-emerald-400">
+                  {formatCurrency(creditUtilization.limit - totalOwed)}
+                </p>
+                <p className="text-[10px] text-emerald-400/60 mt-0.5">left to spend</p>
+              </div>
+
+              {/* Center - Ring */}
+              <div className="relative">
+                <ProgressRing
+                  percentage={creditUtilization.percentage}
+                  size="lg"
+                  color={getUtilizationColor(creditUtilization.percentage)}
+                />
+              </div>
+
+              {/* Right Side - Used */}
+              <div className="flex-1 text-center">
+                <p className="text-xs text-gray-500 mb-1">Used</p>
+                <p
+                  className="text-xl font-bold"
+                  style={{ color: getUtilizationColor(creditUtilization.percentage) }}
+                >
+                  {formatCurrency(totalOwed)}
+                </p>
+                <p
+                  className="text-[10px] mt-0.5"
+                  style={{ color: `${getUtilizationColor(creditUtilization.percentage)}99` }}
+                >
+                  spent
+                </p>
+              </div>
+            </div>
+
+            {/* Limit Bar */}
+            <div className="relative mb-4">
+              {/* Background track */}
+              <div className="h-2 bg-dark-bg rounded-full overflow-hidden">
+                {/* Used portion */}
+                <div
+                  className="h-full rounded-full transition-all duration-500 relative"
+                  style={{
+                    width: `${Math.min(creditUtilization.percentage, 100)}%`,
+                    backgroundColor: getUtilizationColor(creditUtilization.percentage),
+                  }}
+                />
+              </div>
+              {/* Labels below bar */}
+              <div className="flex justify-between mt-1.5">
+                <span className="text-[10px] text-gray-500">$0</span>
+                <span className="text-[10px] text-gray-400 font-medium">
+                  {formatCurrency(creditUtilization.limit)} limit
+                </span>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="text-center py-6">
+            <p className="text-gray-500 text-sm">No credit limits set</p>
+            <button
+              onClick={() => navigate('/settings')}
+              className="mt-2 text-xs text-blue-400 hover:text-blue-300"
+            >
+              Set up limits
+            </button>
           </div>
-          {creditUtilization.limit > 0 && (
-            <ProgressRing
-              percentage={creditUtilization.percentage}
-              size="lg"
-              color={getUtilizationColor(creditUtilization.percentage)}
-            />
-          )}
-        </div>
+        )}
 
         {/* Platform Breakdown */}
         {platformCredits.length > 0 && (

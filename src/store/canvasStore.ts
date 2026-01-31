@@ -16,6 +16,14 @@ import {
 } from '../types/canvas';
 import { canvasStorage } from '../services/canvasStorage';
 
+interface TextCreationState {
+  isCreating: boolean;
+  x: number;
+  y: number;
+  screenX: number;
+  screenY: number;
+}
+
 interface CanvasStore {
   // Document State
   currentDocumentId: string | null;
@@ -43,6 +51,10 @@ interface CanvasStore {
   isDrawing: boolean;
   isPanning: boolean;
   isSpacebarPanning: boolean;
+  isLightMode: boolean;
+
+  // Text Creation State
+  textCreationState: TextCreationState;
 
   // Loading State
   isLoading: boolean;
@@ -97,6 +109,12 @@ interface CanvasStore {
   setIsDrawing: (isDrawing: boolean) => void;
   setIsPanning: (isPanning: boolean) => void;
   setSpacebarPanning: (isSpacebarPanning: boolean) => void;
+  toggleLightMode: () => void;
+  centerView: (canvasWidth: number, canvasHeight: number) => void;
+
+  // Text Creation Actions
+  startTextCreation: (state: Omit<TextCreationState, 'isCreating'>) => void;
+  cancelTextCreation: () => void;
 }
 
 export const useCanvasStore = create<CanvasStore>((set, get) => ({
@@ -114,6 +132,14 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   isDrawing: false,
   isPanning: false,
   isSpacebarPanning: false,
+  isLightMode: false,
+  textCreationState: {
+    isCreating: false,
+    x: 0,
+    y: 0,
+    screenX: 0,
+    screenY: 0,
+  },
   isLoading: false,
   isInitialized: false,
 
@@ -462,6 +488,94 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   setIsDrawing: (isDrawing) => set({ isDrawing }),
   setIsPanning: (isPanning) => set({ isPanning }),
   setSpacebarPanning: (isSpacebarPanning) => set({ isSpacebarPanning }),
+  toggleLightMode: () => set((state) => ({ isLightMode: !state.isLightMode })),
+  centerView: (canvasWidth, canvasHeight) => {
+    const { elements } = get();
+
+    if (elements.length === 0) {
+      // No elements - just reset to center
+      set({ viewport: { x: 0, y: 0, scale: 1 } });
+      return;
+    }
+
+    // Calculate bounding box of all elements
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+    for (const el of elements) {
+      const x = el.x;
+      const y = el.y;
+      // Estimate element size based on type
+      let width = 100, height = 50;
+
+      if ('width' in el && 'height' in el) {
+        width = (el as { width: number }).width;
+        height = (el as { height: number }).height;
+      } else if ('radius' in el) {
+        width = height = (el as { radius: number }).radius * 2;
+      } else if ('points' in el) {
+        const points = (el as { points: number[] }).points;
+        let pMinX = Infinity, pMinY = Infinity, pMaxX = -Infinity, pMaxY = -Infinity;
+        for (let i = 0; i < points.length; i += 2) {
+          pMinX = Math.min(pMinX, points[i]);
+          pMaxX = Math.max(pMaxX, points[i]);
+          pMinY = Math.min(pMinY, points[i + 1]);
+          pMaxY = Math.max(pMaxY, points[i + 1]);
+        }
+        width = pMaxX - pMinX || 50;
+        height = pMaxY - pMinY || 50;
+      }
+
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x + width);
+      maxY = Math.max(maxY, y + height);
+    }
+
+    // Add padding
+    const padding = 50;
+    minX -= padding;
+    minY -= padding;
+    maxX += padding;
+    maxY += padding;
+
+    const contentWidth = maxX - minX;
+    const contentHeight = maxY - minY;
+    const centerX = minX + contentWidth / 2;
+    const centerY = minY + contentHeight / 2;
+
+    // Calculate scale to fit content
+    const scaleX = canvasWidth / contentWidth;
+    const scaleY = canvasHeight / contentHeight;
+    const scale = Math.min(Math.max(0.1, Math.min(scaleX, scaleY, 1)), 2);
+
+    // Center the content
+    set({
+      viewport: {
+        x: canvasWidth / 2 - centerX * scale,
+        y: canvasHeight / 2 - centerY * scale,
+        scale,
+      },
+    });
+  },
+
+  // Text Creation Actions
+  startTextCreation: (state) =>
+    set({
+      textCreationState: {
+        isCreating: true,
+        ...state,
+      },
+    }),
+  cancelTextCreation: () =>
+    set({
+      textCreationState: {
+        isCreating: false,
+        x: 0,
+        y: 0,
+        screenX: 0,
+        screenY: 0,
+      },
+    }),
 }));
 
 // Auto-save on element changes (debounced)

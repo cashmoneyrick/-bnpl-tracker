@@ -63,35 +63,56 @@ function PlatformSettings({ platformId }: { platformId: PlatformId }) {
     const newLimit = parseDollarInput(limitInput);
     if (newLimit !== null) {
       setSaveStatus('saving');
-      await updatePlatformLimit(platformId, newLimit);
-      setSaveStatus('saved');
-      setTimeout(() => setSaveStatus('idle'), 2000);
-      setIsEditingLimit(false);
+      try {
+        await updatePlatformLimit(platformId, newLimit);
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus('idle'), 2000);
+        setIsEditingLimit(false);
+      } catch (error) {
+        console.error('Failed to save limit:', error);
+        setSaveStatus('idle');
+      }
     }
   };
 
   const handleSaveSchedule = async () => {
     setSaveStatus('saving');
-    await updatePlatformSchedule(platformId, installments, intervalDays);
-    setSaveStatus('saved');
-    setTimeout(() => setSaveStatus('idle'), 2000);
+    try {
+      await updatePlatformSchedule(platformId, installments, intervalDays);
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 2000);
+    } catch (error) {
+      console.error('Failed to save schedule:', error);
+      setSaveStatus('idle');
+    }
   };
 
   const handleSaveGoal = async () => {
     const newGoal = goalInput ? parseDollarInput(goalInput) : null;
     setSaveStatus('saving');
-    await updatePlatformGoal(platformId, newGoal !== null && newGoal > 0 ? newGoal : undefined);
-    setSaveStatus('saved');
-    setTimeout(() => setSaveStatus('idle'), 2000);
-    setIsEditingGoal(false);
+    try {
+      await updatePlatformGoal(platformId, newGoal !== null && newGoal > 0 ? newGoal : undefined);
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 2000);
+      setIsEditingGoal(false);
+    } catch (error) {
+      console.error('Failed to save goal:', error);
+      setSaveStatus('idle');
+    }
   };
 
   const handleChangeTier = async (newTier: PlatformTier) => {
     setTier(newTier);
     setSaveStatus('saving');
-    await updatePlatformTier(platformId, newTier);
-    setSaveStatus('saved');
-    setTimeout(() => setSaveStatus('idle'), 2000);
+    try {
+      await updatePlatformTier(platformId, newTier);
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 2000);
+    } catch (error) {
+      console.error('Failed to save tier:', error);
+      setSaveStatus('idle');
+      setTier(platform?.tier || 'limited'); // Revert on error
+    }
   };
 
   return (

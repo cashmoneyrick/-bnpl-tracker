@@ -20,7 +20,7 @@ export function CanvasPage() {
   }
 
   return (
-    <div className="h-full flex flex-col -m-6">
+    <div className="absolute inset-0 flex flex-col bg-dark-bg">
       <Canvas />
     </div>
   );

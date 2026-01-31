@@ -258,7 +258,7 @@ export const DEFAULT_GRID_SETTINGS: GridSettings = {
   size: 20,
   snapToGrid: true,
   showGrid: true,
-  gridColor: '#262626',
+  gridColor: '#404040',
 };
 
 export const DEFAULT_TOOL_SETTINGS: ToolSettings = {
