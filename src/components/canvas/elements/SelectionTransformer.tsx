@@ -75,8 +75,16 @@ export function SelectionTransformer({ selectedNodes }: SelectionTransformerProp
         const dy = node.y();
         const element = useCanvasStore.getState().elements.find((el) => el.id === id);
         if (element && 'points' in element && (dx !== 0 || dy !== 0)) {
+          // Snap the DELTA, not each point
+          const snappedDx = gridSettings.snapToGrid
+            ? Math.round(dx / gridSettings.size) * gridSettings.size
+            : dx;
+          const snappedDy = gridSettings.snapToGrid
+            ? Math.round(dy / gridSettings.size) * gridSettings.size
+            : dy;
+
           const newPoints = (element as { points: number[] }).points.map((p: number, i: number) =>
-            i % 2 === 0 ? snapToGrid(p + dx) : snapToGrid(p + dy)
+            i % 2 === 0 ? p + snappedDx : p + snappedDy
           );
           updateElement(id, { points: newPoints });
           node.x(0);

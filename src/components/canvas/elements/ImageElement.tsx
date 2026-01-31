@@ -53,16 +53,27 @@ export const ImageShape = forwardRef<Konva.Group, ImageElementProps>(
     }, [element.src]);
 
     const handleDragEnd = (e: { target: { x: (val?: number) => number; y: (val?: number) => number } }) => {
-      const selectedIds = useCanvasStore.getState().selectedElementIds;
-      const dx = e.target.x() - element.x;
-      const dy = e.target.y() - element.y;
+      const store = useCanvasStore.getState();
+      const selectedIds = store.selectedElementIds;
+
+      // Read fresh element position from store to avoid stale closure
+      const freshElement = store.elements.find((el) => el.id === element.id);
+      if (!freshElement) return;
+
+      const freshX = 'x' in freshElement ? freshElement.x : 0;
+      const freshY = 'y' in freshElement ? freshElement.y : 0;
+
+      const dx = e.target.x() - freshX;
+      const dy = e.target.y() - freshY;
+
+      if (dx === 0 && dy === 0) return;
 
       // Group move: if this element is part of a multi-selection, move all selected elements
       if (selectedIds.length > 1 && selectedIds.includes(element.id)) {
-        useCanvasStore.getState().moveSelectedElements(dx, dy);
-        // Reset position to original (moveSelectedElements updates the store)
-        e.target.x(element.x);
-        e.target.y(element.y);
+        store.moveSelectedElements(dx, dy);
+        // Reset to fresh position
+        e.target.x(freshX);
+        e.target.y(freshY);
       } else {
         // Single element move
         updateElement(element.id, {
