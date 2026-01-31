@@ -16,12 +16,17 @@ import {
 } from '../types/canvas';
 import { canvasStorage } from '../services/canvasStorage';
 
-interface TextCreationState {
-  isCreating: boolean;
-  x: number;
-  y: number;
+interface TextInputState {
+  isInputting: boolean;
+  boxX: number;
+  boxY: number;
+  boxWidth: number;
+  boxHeight: number;
+  fontSize: number;
   screenX: number;
   screenY: number;
+  screenWidth: number;
+  screenHeight: number;
 }
 
 interface CanvasStore {
@@ -53,8 +58,8 @@ interface CanvasStore {
   isSpacebarPanning: boolean;
   isLightMode: boolean;
 
-  // Text Creation State
-  textCreationState: TextCreationState;
+  // Text Input State
+  textInputState: TextInputState;
 
   // Loading State
   isLoading: boolean;
@@ -80,6 +85,7 @@ interface CanvasStore {
   selectElements: (ids: string[], addToSelection?: boolean) => void;
   selectAll: () => void;
   deselectAll: () => void;
+  moveSelectedElements: (deltaX: number, deltaY: number) => void;
 
   // Tool Actions
   setActiveTool: (tool: CanvasTool) => void;
@@ -112,9 +118,9 @@ interface CanvasStore {
   toggleLightMode: () => void;
   centerView: (canvasWidth: number, canvasHeight: number) => void;
 
-  // Text Creation Actions
-  startTextCreation: (state: Omit<TextCreationState, 'isCreating'>) => void;
-  cancelTextCreation: () => void;
+  // Text Input Actions
+  setTextInputState: (state: TextInputState) => void;
+  clearTextInput: () => void;
 }
 
 export const useCanvasStore = create<CanvasStore>((set, get) => ({
@@ -133,12 +139,17 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   isPanning: false,
   isSpacebarPanning: false,
   isLightMode: false,
-  textCreationState: {
-    isCreating: false,
-    x: 0,
-    y: 0,
+  textInputState: {
+    isInputting: false,
+    boxX: 0,
+    boxY: 0,
+    boxWidth: 0,
+    boxHeight: 0,
+    fontSize: 16,
     screenX: 0,
     screenY: 0,
+    screenWidth: 0,
+    screenHeight: 0,
   },
   isLoading: false,
   isInitialized: false,
@@ -150,6 +161,23 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     set({ isLoading: true });
     try {
       const documents = await canvasStorage.getAllDocuments();
+
+      if (documents.length === 0) {
+        // Auto-create a default document for new users
+        const defaultDoc = canvasStorage.createDefaultDocument('Untitled Canvas');
+        await canvasStorage.saveDocument(defaultDoc);
+
+        set({
+          documents: [defaultDoc],
+          currentDocumentId: defaultDoc.id,
+          elements: [],
+          viewport: { ...DEFAULT_VIEWPORT },
+          gridSettings: { ...DEFAULT_GRID_SETTINGS },
+          isInitialized: true,
+          isLoading: false,
+        });
+        return;
+      }
 
       // Load the most recently updated document
       const sortedDocs = [...documents].sort(
@@ -359,6 +387,39 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     set({ selectedElementIds: [] });
   },
 
+  moveSelectedElements: (deltaX, deltaY) => {
+    const { selectedElementIds, elements, gridSettings } = get();
+    if (selectedElementIds.length === 0) return;
+    if (deltaX === 0 && deltaY === 0) return;
+
+    const snapToGrid = (value: number) => {
+      if (!gridSettings.snapToGrid) return value;
+      return Math.round(value / gridSettings.size) * gridSettings.size;
+    };
+
+    set({
+      elements: elements.map((el) => {
+        if (!selectedElementIds.includes(el.id)) return el;
+
+        // Handle point-based elements (freehand, line, arrow)
+        if (el.type === 'freehand' || el.type === 'line' || el.type === 'arrow') {
+          const newPoints = el.points.map((p, i) =>
+            i % 2 === 0 ? snapToGrid(p + deltaX) : snapToGrid(p + deltaY)
+          );
+          return { ...el, points: newPoints, updatedAt: new Date().toISOString() };
+        }
+
+        // Standard x/y elements
+        return {
+          ...el,
+          x: snapToGrid(el.x + deltaX),
+          y: snapToGrid(el.y + deltaY),
+          updatedAt: new Date().toISOString(),
+        } as typeof el;
+      }),
+    });
+  },
+
   // Tool Actions
   setActiveTool: (tool) => {
     set({ activeTool: tool, selectedElementIds: [] });
@@ -443,8 +504,8 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       elements: JSON.parse(JSON.stringify(elements)), // Deep clone
     };
 
-    // Keep only last 50 history entries
-    const trimmedHistory = [...newHistory, entry].slice(-50);
+    // Keep only last 20 history entries to prevent memory issues
+    const trimmedHistory = [...newHistory, entry].slice(-20);
 
     set({
       history: trimmedHistory,
@@ -500,33 +561,43 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     });
   },
 
-  // Text Creation Actions
-  startTextCreation: (state) =>
+  // Text Input Actions
+  setTextInputState: (state) => set({ textInputState: state }),
+  clearTextInput: () =>
     set({
-      textCreationState: {
-        isCreating: true,
-        ...state,
-      },
-    }),
-  cancelTextCreation: () =>
-    set({
-      textCreationState: {
-        isCreating: false,
-        x: 0,
-        y: 0,
+      textInputState: {
+        isInputting: false,
+        boxX: 0,
+        boxY: 0,
+        boxWidth: 0,
+        boxHeight: 0,
+        fontSize: 16,
         screenX: 0,
         screenY: 0,
+        screenWidth: 0,
+        screenHeight: 0,
       },
     }),
 }));
 
-// Auto-save on element changes (debounced)
+// Auto-save on element, viewport, or grid changes (debounced)
+// Use shorter delay (1s) for data changes, longer delay (3s) for viewport-only changes
 let saveTimeout: ReturnType<typeof setTimeout> | null = null;
 useCanvasStore.subscribe((state, prevState) => {
-  if (state.elements !== prevState.elements && state.currentDocumentId) {
+  if (!state.currentDocumentId) return;
+
+  const elementsChanged = state.elements !== prevState.elements;
+  const gridChanged = state.gridSettings !== prevState.gridSettings;
+  const viewportChanged = state.viewport !== prevState.viewport;
+
+  if (elementsChanged || gridChanged || viewportChanged) {
     if (saveTimeout) clearTimeout(saveTimeout);
+
+    // Data changes save quickly, viewport-only changes use longer delay
+    const delay = elementsChanged || gridChanged ? 1000 : 3000;
+
     saveTimeout = setTimeout(() => {
       state.saveCurrentDocument();
-    }, 1000);
+    }, delay);
   }
 });

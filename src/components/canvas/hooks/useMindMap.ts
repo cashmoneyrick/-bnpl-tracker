@@ -36,8 +36,8 @@ export function useMindMap(stageRef: React.RefObject<Stage | null>) {
     );
   }, [elements]);
 
-  // Build tree structure from flat nodes
-  const buildTree = useCallback((nodes: MindMapNodeElement[]): TreeNode | null => {
+  // Build tree structure from flat nodes (returns array for multiple roots)
+  const buildTree = useCallback((nodes: MindMapNodeElement[]): TreeNode[] => {
     const nodeMap = new Map<string, TreeNode>();
 
     // Create tree nodes
@@ -52,37 +52,38 @@ export function useMindMap(stageRef: React.RefObject<Stage | null>) {
       });
     });
 
-    // Build parent-child relationships
-    let root: TreeNode | null = null;
+    // Build parent-child relationships (support multiple roots)
+    const roots: TreeNode[] = [];
     nodes.forEach((node) => {
       const treeNode = nodeMap.get(node.id)!;
       if (node.parentId === null) {
-        root = treeNode;
+        roots.push(treeNode);
       } else {
         const parent = nodeMap.get(node.parentId);
-        if (parent && !node.locked) {
+        if (parent) {
+          // Bug 1B fix: removed !node.locked check - locked just means can't drag
           parent.children.push(treeNode);
         }
       }
     });
 
-    if (!root) return null;
-
-    // Calculate depths
+    // Calculate depths and sort children for each root tree
     const calculateDepths = (node: TreeNode, depth: number) => {
       node.depth = depth;
       node.children.forEach((child) => calculateDepths(child, depth + 1));
     };
-    calculateDepths(root, 0);
 
-    // Sort children by their current y position for stability
     const sortChildren = (node: TreeNode) => {
       node.children.sort((a, b) => a.element.y - b.element.y);
       node.children.forEach(sortChildren);
     };
-    sortChildren(root);
 
-    return root;
+    roots.forEach((root) => {
+      calculateDepths(root, 0);
+      sortChildren(root);
+    });
+
+    return roots;
   }, []);
 
   // Calculate subtree heights (for layout)
@@ -125,25 +126,37 @@ export function useMindMap(stageRef: React.RefObject<Stage | null>) {
 
   // Auto-layout all mind map nodes
   const autoLayout = useCallback(() => {
-    const tree = buildTree(mindMapNodes);
-    if (!tree) return;
+    // Bug 1A fix: Read fresh data from store instead of stale memoized mindMapNodes
+    const currentElements = useCanvasStore.getState().elements;
+    const currentMindMapNodes = currentElements.filter(
+      (el): el is MindMapNodeElement => el.type === 'mindmap-node'
+    );
 
-    calculateSubtreeHeights(tree);
+    const roots = buildTree(currentMindMapNodes);
+    if (roots.length === 0) return;
 
-    // Get the root's current position as anchor
-    const rootX = tree.element.x;
-    const rootY = tree.element.y - (tree.subtreeHeight - NODE_HEIGHT) / 2;
+    // Get fresh updateElement from store to avoid stale closure
+    const { updateElement: storeUpdate } = useCanvasStore.getState();
 
-    const positions = layoutTree(tree, rootX, rootY);
+    // Layout each root tree independently
+    roots.forEach((tree) => {
+      calculateSubtreeHeights(tree);
 
-    // Update all node positions
-    positions.forEach((pos, id) => {
-      const node = mindMapNodes.find((n) => n.id === id);
-      if (node && (node.x !== pos.x || node.y !== pos.y)) {
-        updateElement(id, { x: pos.x, y: pos.y });
-      }
+      // Get the root's current position as anchor
+      const rootX = tree.element.x;
+      const rootY = tree.element.y - (tree.subtreeHeight - NODE_HEIGHT) / 2;
+
+      const positions = layoutTree(tree, rootX, rootY);
+
+      // Update all node positions (only if changed by more than 1px to avoid jitter)
+      positions.forEach((pos, id) => {
+        const node = currentMindMapNodes.find((n) => n.id === id);
+        if (node && (Math.abs(node.x - pos.x) > 1 || Math.abs(node.y - pos.y) > 1)) {
+          storeUpdate(id, { x: pos.x, y: pos.y });
+        }
+      });
     });
-  }, [mindMapNodes, buildTree, calculateSubtreeHeights, layoutTree, updateElement]);
+  }, [buildTree, calculateSubtreeHeights, layoutTree]);
 
   // Get visible nodes (respecting collapsed state)
   const visibleNodes = useMemo(() => {
@@ -223,7 +236,11 @@ export function useMindMap(stageRef: React.RefObject<Stage | null>) {
   // Add child node
   const addChildNode = useCallback(
     (parentId: string) => {
-      const parent = mindMapNodes.find((n) => n.id === parentId);
+      // Bug 1D fix: Read fresh from store instead of stale mindMapNodes
+      const currentElements = useCanvasStore.getState().elements;
+      const parent = currentElements.find(
+        (el): el is MindMapNodeElement => el.type === 'mindmap-node' && el.id === parentId
+      );
       if (!parent) return;
 
       // Position child to the right of parent
@@ -258,40 +275,56 @@ export function useMindMap(stageRef: React.RefObject<Stage | null>) {
       // Add the child and get its ID
       const newElementId = addElement(childNode);
 
-      // Update parent's childIds
+      // Update parent's childIds - read fresh again since addElement may have triggered state changes
       if (newElementId) {
-        updateElement(parentId, {
-          childIds: [...parent.childIds, newElementId],
-        });
+        const freshElements = useCanvasStore.getState().elements;
+        const freshParent = freshElements.find(
+          (el): el is MindMapNodeElement => el.type === 'mindmap-node' && el.id === parentId
+        );
+        if (freshParent) {
+          updateElement(parentId, {
+            childIds: [...freshParent.childIds, newElementId],
+          });
+        }
       }
 
-      // Auto-layout after adding
-      setTimeout(autoLayout, 50);
+      // Auto-layout after adding (slightly longer delay to ensure state settles)
+      setTimeout(autoLayout, 100);
     },
-    [mindMapNodes, toolSettings.mindmap, addElement, updateElement, autoLayout]
+    [toolSettings.mindmap, addElement, updateElement, autoLayout]
   );
 
   // Toggle collapse/expand
   const toggleCollapse = useCallback(
     (nodeId: string) => {
-      const node = mindMapNodes.find((n) => n.id === nodeId);
+      // Read fresh from store
+      const currentElements = useCanvasStore.getState().elements;
+      const node = currentElements.find(
+        (el): el is MindMapNodeElement => el.type === 'mindmap-node' && el.id === nodeId
+      );
       if (!node) return;
 
       updateElement(nodeId, { collapsed: !node.collapsed });
     },
-    [mindMapNodes, updateElement]
+    [updateElement]
   );
 
   // Delete node and its subtree
   const deleteNode = useCallback(
     (nodeId: string) => {
-      const node = mindMapNodes.find((n) => n.id === nodeId);
+      // Read fresh from store
+      const currentElements = useCanvasStore.getState().elements;
+      const currentMindMapNodes = currentElements.filter(
+        (el): el is MindMapNodeElement => el.type === 'mindmap-node'
+      );
+
+      const node = currentMindMapNodes.find((n) => n.id === nodeId);
       if (!node) return;
 
       // Collect all descendant IDs
       const toDelete: string[] = [nodeId];
       const collectDescendants = (id: string) => {
-        const n = mindMapNodes.find((x) => x.id === id);
+        const n = currentMindMapNodes.find((x) => x.id === id);
         if (n) {
           n.childIds.forEach((childId) => {
             toDelete.push(childId);
@@ -303,7 +336,7 @@ export function useMindMap(stageRef: React.RefObject<Stage | null>) {
 
       // Update parent's childIds
       if (node.parentId) {
-        const parent = mindMapNodes.find((n) => n.id === node.parentId);
+        const parent = currentMindMapNodes.find((n) => n.id === node.parentId);
         if (parent) {
           updateElement(node.parentId, {
             childIds: parent.childIds.filter((id) => id !== nodeId),
@@ -314,7 +347,7 @@ export function useMindMap(stageRef: React.RefObject<Stage | null>) {
       // Delete all nodes
       deleteElements(toDelete);
     },
-    [mindMapNodes, updateElement, deleteElements]
+    [updateElement, deleteElements]
   );
 
   // Handle click on canvas with mindmap tool
@@ -323,16 +356,12 @@ export function useMindMap(stageRef: React.RefObject<Stage | null>) {
       if (activeTool !== 'mindmap') return;
       if (e.evt.type === 'mousedown' && (e.evt as MouseEvent).button !== 0) return;
 
-      // Only create root node if clicking on empty space
+      // Create a root node when clicking on empty space (allows multiple roots)
       if (e.target === stageRef.current) {
-        // Check if there's already a root node
-        const hasRoot = mindMapNodes.some((n) => n.parentId === null);
-        if (!hasRoot) {
-          createRootNode(e);
-        }
+        createRootNode(e);
       }
     },
-    [activeTool, stageRef, mindMapNodes, createRootNode]
+    [activeTool, stageRef, createRootNode]
   );
 
   return {

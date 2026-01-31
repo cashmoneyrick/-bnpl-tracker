@@ -52,11 +52,24 @@ export const ImageShape = forwardRef<Konva.Group, ImageElementProps>(
       };
     }, [element.src]);
 
-    const handleDragEnd = (e: { target: { x: () => number; y: () => number } }) => {
-      updateElement(element.id, {
-        x: snapToGrid(e.target.x()),
-        y: snapToGrid(e.target.y()),
-      });
+    const handleDragEnd = (e: { target: { x: (val?: number) => number; y: (val?: number) => number } }) => {
+      const selectedIds = useCanvasStore.getState().selectedElementIds;
+      const dx = e.target.x() - element.x;
+      const dy = e.target.y() - element.y;
+
+      // Group move: if this element is part of a multi-selection, move all selected elements
+      if (selectedIds.length > 1 && selectedIds.includes(element.id)) {
+        useCanvasStore.getState().moveSelectedElements(dx, dy);
+        // Reset position to original (moveSelectedElements updates the store)
+        e.target.x(element.x);
+        e.target.y(element.y);
+      } else {
+        // Single element move
+        updateElement(element.id, {
+          x: snapToGrid(e.target.x()),
+          y: snapToGrid(e.target.y()),
+        });
+      }
     };
 
     if (loadError) {

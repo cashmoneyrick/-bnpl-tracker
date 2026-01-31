@@ -22,11 +22,24 @@ export const RectangleShape = forwardRef<Konva.Rect, RectangleProps>(
       return Math.round(value / gridSettings.size) * gridSettings.size;
     };
 
-    const handleDragEnd = (e: { target: { x: () => number; y: () => number } }) => {
-      updateElement(element.id, {
-        x: snapToGrid(e.target.x()),
-        y: snapToGrid(e.target.y()),
-      });
+    const handleDragEnd = (e: { target: { x: (val?: number) => number; y: (val?: number) => number } }) => {
+      const selectedIds = useCanvasStore.getState().selectedElementIds;
+      const dx = e.target.x() - element.x;
+      const dy = e.target.y() - element.y;
+
+      // Group move: if this element is part of a multi-selection, move all selected elements
+      if (selectedIds.length > 1 && selectedIds.includes(element.id)) {
+        useCanvasStore.getState().moveSelectedElements(dx, dy);
+        // Reset position to original (moveSelectedElements updates the store)
+        e.target.x(element.x);
+        e.target.y(element.y);
+      } else {
+        // Single element move
+        updateElement(element.id, {
+          x: snapToGrid(e.target.x()),
+          y: snapToGrid(e.target.y()),
+        });
+      }
     };
 
     // Determine shadow color based on state
@@ -91,11 +104,24 @@ export const CircleShape = forwardRef<Konva.Circle, CircleProps>(
       return Math.round(value / gridSettings.size) * gridSettings.size;
     };
 
-    const handleDragEnd = (e: { target: { x: () => number; y: () => number } }) => {
-      updateElement(element.id, {
-        x: snapToGrid(e.target.x()),
-        y: snapToGrid(e.target.y()),
-      });
+    const handleDragEnd = (e: { target: { x: (val?: number) => number; y: (val?: number) => number } }) => {
+      const selectedIds = useCanvasStore.getState().selectedElementIds;
+      const dx = e.target.x() - element.x;
+      const dy = e.target.y() - element.y;
+
+      // Group move: if this element is part of a multi-selection, move all selected elements
+      if (selectedIds.length > 1 && selectedIds.includes(element.id)) {
+        useCanvasStore.getState().moveSelectedElements(dx, dy);
+        // Reset position to original (moveSelectedElements updates the store)
+        e.target.x(element.x);
+        e.target.y(element.y);
+      } else {
+        // Single element move
+        updateElement(element.id, {
+          x: snapToGrid(e.target.x()),
+          y: snapToGrid(e.target.y()),
+        });
+      }
     };
 
     // Determine shadow color based on state

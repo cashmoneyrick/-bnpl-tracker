@@ -166,6 +166,87 @@ function isNearMindMapNode(
   return distance <= radius;
 }
 
+// Quick rough bounds check to skip elements clearly out of range
+// Returns false if element is definitely too far, true if it might be in range
+function roughBoundsCheck(
+  px: number,
+  py: number,
+  element: CanvasElement,
+  radius: number
+): boolean {
+  // Calculate rough bounding box for each element type
+  let minX: number, minY: number, maxX: number, maxY: number;
+
+  switch (element.type) {
+    case 'freehand': {
+      // For freehand, find min/max from points array
+      const points = element.points;
+      if (points.length < 2) return false;
+      minX = minY = Infinity;
+      maxX = maxY = -Infinity;
+      for (let i = 0; i < points.length; i += 2) {
+        minX = Math.min(minX, points[i]);
+        maxX = Math.max(maxX, points[i]);
+        minY = Math.min(minY, points[i + 1]);
+        maxY = Math.max(maxY, points[i + 1]);
+      }
+      // Add stroke width to bounds
+      const sw = element.strokeWidth / 2;
+      minX -= sw; minY -= sw; maxX += sw; maxY += sw;
+      break;
+    }
+    case 'rectangle':
+      minX = element.x;
+      minY = element.y;
+      maxX = element.x + element.width;
+      maxY = element.y + element.height;
+      break;
+    case 'circle':
+      minX = element.x - element.radius;
+      minY = element.y - element.radius;
+      maxX = element.x + element.radius;
+      maxY = element.y + element.radius;
+      break;
+    case 'line':
+    case 'arrow': {
+      const pts = element.points;
+      if (pts.length < 4) return false;
+      minX = minY = Infinity;
+      maxX = maxY = -Infinity;
+      for (let i = 0; i < pts.length; i += 2) {
+        minX = Math.min(minX, pts[i]);
+        maxX = Math.max(maxX, pts[i]);
+        minY = Math.min(minY, pts[i + 1]);
+        maxY = Math.max(maxY, pts[i + 1]);
+      }
+      const strokeW = element.strokeWidth / 2;
+      minX -= strokeW; minY -= strokeW; maxX += strokeW; maxY += strokeW;
+      break;
+    }
+    case 'text':
+      minX = element.x;
+      minY = element.y;
+      maxX = element.x + (element.width || 200);
+      maxY = element.y + element.fontSize * 1.5;
+      break;
+    case 'image':
+    case 'mindmap-node':
+      minX = element.x;
+      minY = element.y;
+      maxX = element.x + element.width;
+      maxY = element.y + element.height;
+      break;
+    case 'mindmap-connection':
+      return false;
+    default:
+      return true; // Unknown type, do full check
+  }
+
+  // Expand bounds by eraser radius and check if point is inside
+  return px >= minX - radius && px <= maxX + radius &&
+         py >= minY - radius && py <= maxY + radius;
+}
+
 // Check if eraser point is near an element
 function isNearElement(
   px: number,
@@ -173,6 +254,11 @@ function isNearElement(
   element: CanvasElement,
   radius: number
 ): boolean {
+  // Quick pre-filter: skip elements clearly out of range
+  if (!roughBoundsCheck(px, py, element, radius)) {
+    return false;
+  }
+
   switch (element.type) {
     case 'freehand':
       return isPointNearPath(px, py, element, radius);

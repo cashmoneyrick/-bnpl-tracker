@@ -27,10 +27,18 @@ export const LineShape = forwardRef<Konva.Line, LineProps>(
       const dy = e.target.y();
 
       if (dx !== 0 || dy !== 0) {
-        const newPoints = element.points.map((p, i) =>
-          i % 2 === 0 ? snapToGrid(p + dx) : snapToGrid(p + dy)
-        );
-        updateElement(element.id, { points: newPoints });
+        const selectedIds = useCanvasStore.getState().selectedElementIds;
+
+        // Group move: if this element is part of a multi-selection, move all selected elements
+        if (selectedIds.length > 1 && selectedIds.includes(element.id)) {
+          useCanvasStore.getState().moveSelectedElements(dx, dy);
+        } else {
+          // Single element move
+          const newPoints = element.points.map((p, i) =>
+            i % 2 === 0 ? snapToGrid(p + dx) : snapToGrid(p + dy)
+          );
+          updateElement(element.id, { points: newPoints });
+        }
         e.target.x(0);
         e.target.y(0);
       }
@@ -100,10 +108,18 @@ export const ArrowShape = forwardRef<Konva.Arrow, ArrowProps>(
       const dy = e.target.y();
 
       if (dx !== 0 || dy !== 0) {
-        const newPoints = element.points.map((p, i) =>
-          i % 2 === 0 ? snapToGrid(p + dx) : snapToGrid(p + dy)
-        );
-        updateElement(element.id, { points: newPoints });
+        const selectedIds = useCanvasStore.getState().selectedElementIds;
+
+        // Group move: if this element is part of a multi-selection, move all selected elements
+        if (selectedIds.length > 1 && selectedIds.includes(element.id)) {
+          useCanvasStore.getState().moveSelectedElements(dx, dy);
+        } else {
+          // Single element move
+          const newPoints = element.points.map((p, i) =>
+            i % 2 === 0 ? snapToGrid(p + dx) : snapToGrid(p + dy)
+          );
+          updateElement(element.id, { points: newPoints });
+        }
         e.target.x(0);
         e.target.y(0);
       }

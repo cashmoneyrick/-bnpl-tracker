@@ -17,7 +17,6 @@ export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions = {}) 
   const selectAll = useCanvasStore((state) => state.selectAll);
   const deselectAll = useCanvasStore((state) => state.deselectAll);
   const deleteElements = useCanvasStore((state) => state.deleteElements);
-  const selectedElementIds = useCanvasStore((state) => state.selectedElementIds);
 
   // Check if user is currently editing text (input/textarea focused)
   const isEditingText = useCallback(() => {
@@ -46,6 +45,10 @@ export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions = {}) 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (!enabled) return;
+
+      // Never intercept keys during text input
+      const { textInputState } = useCanvasStore.getState();
+      if (textInputState.isInputting) return;
 
       // Space bar for temporary panning
       if (e.code === 'Space' && !e.repeat && !isEditingText()) {
@@ -88,9 +91,13 @@ export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions = {}) 
       }
 
       // Delete/Backspace: Delete selected elements
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedElementIds.length > 0) {
-        e.preventDefault();
-        deleteElements(selectedElementIds);
+      // Read fresh from store to avoid stale closure
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        const ids = useCanvasStore.getState().selectedElementIds;
+        if (ids.length > 0) {
+          e.preventDefault();
+          deleteElements(ids);
+        }
         return;
       }
 
@@ -114,7 +121,6 @@ export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions = {}) 
       selectAll,
       deselectAll,
       deleteElements,
-      selectedElementIds,
       setActiveTool,
     ]
   );

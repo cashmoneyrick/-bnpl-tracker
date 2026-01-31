@@ -1,5 +1,5 @@
 import { useRef, useCallback } from 'react';
-import { Stage, Layer } from 'react-konva';
+import { Stage, Layer, Rect } from 'react-konva';
 import type { Stage as StageType } from 'konva/lib/Stage';
 import type { KonvaEventObject } from 'konva/lib/Node';
 import type Konva from 'konva';
@@ -16,6 +16,7 @@ import { useEraser } from './hooks/useEraser';
 import { useShapes, ShapePreview } from './hooks/useShapes';
 import { useText } from './hooks/useText';
 import { useMindMap } from './hooks/useMindMap';
+import { useSelection } from './hooks/useSelection';
 import { useCanvasStore } from '../../store/canvasStore';
 
 interface CanvasStageProps {
@@ -40,7 +41,6 @@ export function CanvasStage({ width, height, stageRef: externalStageRef }: Canva
   const elements = useCanvasStore((state) => state.elements);
   const selectedElementIds = useCanvasStore((state) => state.selectedElementIds);
   const selectElements = useCanvasStore((state) => state.selectElements);
-  const deselectAll = useCanvasStore((state) => state.deselectAll);
   const toolSettings = useCanvasStore((state) => state.toolSettings);
 
   // Drawing hook
@@ -56,7 +56,13 @@ export function CanvasStage({ width, height, stageRef: externalStageRef }: Canva
     useShapes(stageRef);
 
   // Text hook
-  const { isTextTool, handleTextStart } = useText(stageRef);
+  const {
+    drawingState: textDrawingState,
+    isTextTool,
+    handleTextStart,
+    handleTextMove,
+    handleTextEnd,
+  } = useText(stageRef);
 
   // Mind map hook
   const {
@@ -66,6 +72,14 @@ export function CanvasStage({ width, height, stageRef: externalStageRef }: Canva
     addChildNode,
     toggleCollapse,
   } = useMindMap(stageRef);
+
+  // Selection hook (marquee selection)
+  const {
+    selectionBox,
+    handleSelectionStart,
+    handleSelectionMove,
+    handleSelectionEnd,
+  } = useSelection(stageRef);
 
   // Handle wheel zoom
   const handleWheel = useCallback(
@@ -142,12 +156,12 @@ export function CanvasStage({ width, height, stageRef: externalStageRef }: Canva
         return;
       }
 
-      // Deselect on empty space click
-      if (e.target === stageRef.current && activeTool === 'select') {
-        deselectAll();
+      // Start marquee selection on empty space (deselect happens in handleSelectionEnd if tiny drag)
+      if (activeTool === 'select') {
+        handleSelectionStart(e);
       }
     },
-    [activeTool, setIsPanning, isSpacebarPanning, deselectAll, handleDrawStart, handleEraseStart, isShapeTool, handleShapeStart, isTextTool, handleTextStart, isMindMapTool, handleMindMapClick]
+    [activeTool, setIsPanning, isSpacebarPanning, handleDrawStart, handleEraseStart, isShapeTool, handleShapeStart, isTextTool, handleTextStart, isMindMapTool, handleMindMapClick, handleSelectionStart]
   );
 
   // Handle mouse move
@@ -177,9 +191,22 @@ export function CanvasStage({ width, height, stageRef: externalStageRef }: Canva
       // Shape drawing
       if (isShapeTool) {
         handleShapeMove(e);
+        return;
+      }
+
+      // Text drawing
+      if (activeTool === 'text') {
+        handleTextMove(e);
+        return;
+      }
+
+      // Marquee selection
+      if (activeTool === 'select') {
+        handleSelectionMove(e);
+        return;
       }
     },
-    [isPanning, viewport, setViewport, activeTool, handleDrawMove, handleEraseMove, isShapeTool, handleShapeMove]
+    [isPanning, viewport, setViewport, activeTool, handleDrawMove, handleEraseMove, isShapeTool, handleShapeMove, handleTextMove, handleSelectionMove]
   );
 
   // Handle mouse up
@@ -199,7 +226,15 @@ export function CanvasStage({ width, height, stageRef: externalStageRef }: Canva
     if (isShapeTool) {
       handleShapeEnd();
     }
-  }, [isPanning, setIsPanning, activeTool, handleDrawEnd, handleEraseEnd, isShapeTool, handleShapeEnd]);
+
+    if (activeTool === 'text') {
+      handleTextEnd();
+    }
+
+    if (activeTool === 'select') {
+      handleSelectionEnd();
+    }
+  }, [isPanning, setIsPanning, activeTool, handleDrawEnd, handleEraseEnd, isShapeTool, handleShapeEnd, handleTextEnd, handleSelectionEnd]);
 
   // Handle element selection with shift for multi-select
   const handleElementSelect = useCallback(
@@ -226,7 +261,7 @@ export function CanvasStage({ width, height, stageRef: externalStageRef }: Canva
       case 'arrow':
         return 'crosshair';
       case 'text':
-        return 'text';
+        return 'crosshair';
       case 'mindmap':
         return 'pointer';
       default:
@@ -256,6 +291,8 @@ export function CanvasStage({ width, height, stageRef: externalStageRef }: Canva
             element={element}
             isSelected={isSelected}
             isEraserHovering={isEraserHovering}
+            onSelect={() => handleElementSelect(element.id)}
+            ref={(node: Konva.Line | null) => setShapeRef(element.id, node)}
           />
         );
 
@@ -409,6 +446,36 @@ export function CanvasStage({ width, height, stageRef: externalStageRef }: Canva
             strokeColor={toolSettings.shapes.strokeColor}
             fillColor={toolSettings.shapes.fillColor}
             strokeWidth={toolSettings.shapes.strokeWidth}
+          />
+        )}
+
+        {/* Text box preview while drawing */}
+        {textDrawingState.isDrawing && (
+          <Rect
+            x={Math.min(textDrawingState.startX, textDrawingState.currentX)}
+            y={Math.min(textDrawingState.startY, textDrawingState.currentY)}
+            width={Math.abs(textDrawingState.currentX - textDrawingState.startX)}
+            height={Math.abs(textDrawingState.currentY - textDrawingState.startY)}
+            fill="transparent"
+            stroke="#3b82f6"
+            strokeWidth={1}
+            dash={[6, 3]}
+            listening={false}
+          />
+        )}
+
+        {/* Marquee selection box */}
+        {selectionBox.isSelecting && (
+          <Rect
+            x={Math.min(selectionBox.startX, selectionBox.currentX)}
+            y={Math.min(selectionBox.startY, selectionBox.currentY)}
+            width={Math.abs(selectionBox.currentX - selectionBox.startX)}
+            height={Math.abs(selectionBox.currentY - selectionBox.startY)}
+            fill="rgba(59, 130, 246, 0.1)"
+            stroke="#3b82f6"
+            strokeWidth={1}
+            dash={[4, 4]}
+            listening={false}
           />
         )}
 

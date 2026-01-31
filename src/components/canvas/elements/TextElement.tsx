@@ -24,11 +24,24 @@ export const TextShape = forwardRef<Konva.Group, TextElementProps>(
       return Math.round(value / gridSettings.size) * gridSettings.size;
     };
 
-    const handleDragEnd = (e: { target: { x: () => number; y: () => number } }) => {
-      updateElement(element.id, {
-        x: snapToGrid(e.target.x()),
-        y: snapToGrid(e.target.y()),
-      });
+    const handleDragEnd = (e: { target: { x: (val?: number) => number; y: (val?: number) => number } }) => {
+      const selectedIds = useCanvasStore.getState().selectedElementIds;
+      const dx = e.target.x() - element.x;
+      const dy = e.target.y() - element.y;
+
+      // Group move: if this element is part of a multi-selection, move all selected elements
+      if (selectedIds.length > 1 && selectedIds.includes(element.id)) {
+        useCanvasStore.getState().moveSelectedElements(dx, dy);
+        // Reset position to original (moveSelectedElements updates the store)
+        e.target.x(element.x);
+        e.target.y(element.y);
+      } else {
+        // Single element move
+        updateElement(element.id, {
+          x: snapToGrid(e.target.x()),
+          y: snapToGrid(e.target.y()),
+        });
+      }
     };
 
     const handleDblClick = () => {
@@ -179,26 +192,38 @@ export const TextShape = forwardRef<Konva.Group, TextElementProps>(
 
 TextShape.displayName = 'TextShape';
 
-// Component for creating new text on canvas click
-interface TextCreatorProps {
-  x: number;
-  y: number;
+// Component for text input after drawing a text box
+interface TextBoxInputProps {
+  screenX: number;
+  screenY: number;
+  screenWidth: number;
+  screenHeight: number;
+  fontSize: number;
+  fontFamily: string;
+  color: string;
   onComplete: (text: string) => void;
   onCancel: () => void;
-  settings: {
-    fontFamily: string;
-    fontSize: number;
-    color: string;
-  };
 }
 
-export function TextCreator({ x, y, onComplete, onCancel, settings }: TextCreatorProps) {
+export function TextBoxInput({
+  screenX,
+  screenY,
+  screenWidth,
+  screenHeight,
+  fontSize,
+  fontFamily,
+  color,
+  onComplete,
+  onCancel,
+}: TextBoxInputProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    if (inputRef.current) {
-      inputRef.current.focus();
-    }
+    // Focus with a small delay to ensure the element is mounted
+    const timer = setTimeout(() => {
+      inputRef.current?.focus();
+    }, 50);
+    return () => clearTimeout(timer);
   }, []);
 
   const handleBlur = () => {
@@ -212,24 +237,34 @@ export function TextCreator({ x, y, onComplete, onCancel, settings }: TextCreato
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
+      e.stopPropagation(); // Don't trigger canvas keyboard shortcuts
       onCancel();
     } else if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleBlur();
+      const text = inputRef.current?.value.trim();
+      if (text) {
+        onComplete(text);
+      } else {
+        onCancel();
+      }
     }
   };
 
   return (
     <textarea
       ref={inputRef}
-      className="fixed z-[10000] bg-black/80 border-2 border-blue-500 rounded px-2 py-1 outline-none resize-none text-white"
+      className="fixed z-[10000] border-2 border-blue-500 rounded-sm outline-none resize-none bg-black/60"
       style={{
-        left: x,
-        top: y,
-        minWidth: 150,
-        fontSize: settings.fontSize,
-        fontFamily: settings.fontFamily,
-        color: settings.color,
+        left: screenX,
+        top: screenY,
+        width: Math.max(screenWidth, 60),
+        height: Math.max(screenHeight, 30),
+        fontSize: Math.max(fontSize * 0.8, 10), // Scale down slightly for the input
+        fontFamily,
+        color,
+        padding: '4px',
+        lineHeight: 1.4,
+        overflow: 'hidden',
       }}
       placeholder="Type here..."
       onBlur={handleBlur}

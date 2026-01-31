@@ -68,6 +68,28 @@ export function SelectionTransformer({ selectedNodes }: SelectionTransformerProp
         });
         node.scaleX(1);
         node.scaleY(1);
+      } else if (nodeType === 'Line') {
+        // Lines (freehand paths, arrows, regular lines) store coords in points array
+        // Need to offset all points by the drag delta
+        const dx = node.x();
+        const dy = node.y();
+        const element = useCanvasStore.getState().elements.find((el) => el.id === id);
+        if (element && 'points' in element && (dx !== 0 || dy !== 0)) {
+          const newPoints = (element as { points: number[] }).points.map((p: number, i: number) =>
+            i % 2 === 0 ? snapToGrid(p + dx) : snapToGrid(p + dy)
+          );
+          updateElement(id, { points: newPoints });
+          node.x(0);
+          node.y(0);
+        } else {
+          updateElement(id, {
+            x: snapToGrid(node.x()),
+            y: snapToGrid(node.y()),
+            rotation,
+            scaleX,
+            scaleY,
+          });
+        }
       } else {
         // For other shapes, keep the scale
         updateElement(id, {

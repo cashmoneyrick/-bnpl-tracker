@@ -2,7 +2,7 @@ import { useRef, useEffect, useState, useCallback } from 'react';
 import type { Stage } from 'konva/lib/Stage';
 import { CanvasStage } from './CanvasStage';
 import { CanvasToolbar } from './toolbar/CanvasToolbar';
-import { TextCreator } from './elements/TextElement';
+import { TextBoxInput } from './elements/TextElement';
 import { useImageUpload } from './hooks/useImageUpload';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useCanvasStore } from '../../store/canvasStore';
@@ -23,29 +23,31 @@ export function Canvas() {
   const toggleLightMode = useCanvasStore((state) => state.toggleLightMode);
   const centerView = useCanvasStore((state) => state.centerView);
   const activeTool = useCanvasStore((state) => state.activeTool);
-  const textCreationState = useCanvasStore((state) => state.textCreationState);
-  const cancelTextCreation = useCanvasStore((state) => state.cancelTextCreation);
+  const elements = useCanvasStore((state) => state.elements);
+  const textInputState = useCanvasStore((state) => state.textInputState);
+  const clearTextInput = useCanvasStore((state) => state.clearTextInput);
   const toolSettings = useCanvasStore((state) => state.toolSettings);
   const addElement = useCanvasStore((state) => state.addElement);
 
-  // Text creation handlers
+  // Text input handlers (for draw-box-then-type flow)
   const handleTextComplete = useCallback(
     (text: string) => {
       if (!text.trim()) {
-        cancelTextCreation();
+        clearTextInput();
         return;
       }
 
       const textElement: Omit<TextElement, 'id' | 'createdAt' | 'updatedAt' | 'zIndex'> = {
         type: 'text',
-        x: textCreationState.x,
-        y: textCreationState.y,
+        x: textInputState.boxX,
+        y: textInputState.boxY,
         text: text.trim(),
-        fontSize: toolSettings.text.fontSize,
+        fontSize: textInputState.fontSize,
         fontFamily: toolSettings.text.fontFamily,
         fontStyle: 'normal',
         fill: toolSettings.text.color,
         align: 'left',
+        width: textInputState.boxWidth,
         padding: 4,
         rotation: 0,
         scaleX: 1,
@@ -56,14 +58,14 @@ export function Canvas() {
       };
 
       addElement(textElement);
-      cancelTextCreation();
+      clearTextInput();
     },
-    [textCreationState.x, textCreationState.y, toolSettings.text, addElement, cancelTextCreation]
+    [textInputState, toolSettings.text, addElement, clearTextInput]
   );
 
   const handleTextCancel = useCallback(() => {
-    cancelTextCreation();
-  }, [cancelTextCreation]);
+    clearTextInput();
+  }, [clearTextInput]);
 
   // Image upload hook
   const { openFilePicker } = useImageUpload(stageRef, containerRef);
@@ -100,14 +102,18 @@ export function Canvas() {
           stageRef={stageRef}
         />
 
-        {/* Text Creator Overlay */}
-        {textCreationState.isCreating && (
-          <TextCreator
-            x={textCreationState.screenX}
-            y={textCreationState.screenY}
+        {/* Text Input Overlay — shown after drawing a text box */}
+        {textInputState.isInputting && (
+          <TextBoxInput
+            screenX={textInputState.screenX}
+            screenY={textInputState.screenY}
+            screenWidth={textInputState.screenWidth}
+            screenHeight={textInputState.screenHeight}
+            fontSize={textInputState.fontSize}
+            fontFamily={toolSettings.text.fontFamily}
+            color={toolSettings.text.color}
             onComplete={handleTextComplete}
             onCancel={handleTextCancel}
-            settings={toolSettings.text}
           />
         )}
 
@@ -123,6 +129,16 @@ export function Canvas() {
               </svg>
               <p className="text-gray-300 mb-1">Click to upload an image</p>
               <p className="text-sm text-gray-500">Or drag & drop / paste from clipboard</p>
+            </div>
+          </div>
+        )}
+
+        {/* Mind Map Hint - shown when mindmap tool is selected but no nodes exist */}
+        {activeTool === 'mindmap' && elements.filter(e => e.type === 'mindmap-node').length === 0 && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="text-gray-500 text-center">
+              <p className="text-lg">Click anywhere to create a mind map</p>
+              <p className="text-sm mt-1">Use + buttons on nodes to add branches</p>
             </div>
           </div>
         )}
