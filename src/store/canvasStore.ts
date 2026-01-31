@@ -397,19 +397,27 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       return Math.round(value / gridSettings.size) * gridSettings.size;
     };
 
+    // For point-based elements, snap the DELTA once, not each point
+    const snappedDeltaX = gridSettings.snapToGrid
+      ? Math.round(deltaX / gridSettings.size) * gridSettings.size
+      : deltaX;
+    const snappedDeltaY = gridSettings.snapToGrid
+      ? Math.round(deltaY / gridSettings.size) * gridSettings.size
+      : deltaY;
+
     set({
       elements: elements.map((el) => {
         if (!selectedElementIds.includes(el.id)) return el;
 
-        // Handle point-based elements (freehand, line, arrow)
+        // Handle point-based elements — add snapped delta WITHOUT snapping each point
         if (el.type === 'freehand' || el.type === 'line' || el.type === 'arrow') {
           const newPoints = el.points.map((p, i) =>
-            i % 2 === 0 ? snapToGrid(p + deltaX) : snapToGrid(p + deltaY)
+            i % 2 === 0 ? p + snappedDeltaX : p + snappedDeltaY
           );
           return { ...el, points: newPoints, updatedAt: new Date().toISOString() };
         }
 
-        // Standard x/y elements
+        // Standard x/y elements — snap the final position
         return {
           ...el,
           x: snapToGrid(el.x + deltaX),

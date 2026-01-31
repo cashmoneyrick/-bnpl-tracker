@@ -17,11 +17,6 @@ export const LineShape = forwardRef<Konva.Line, LineProps>(
     const activeTool = useCanvasStore((state) => state.activeTool);
     const gridSettings = useCanvasStore((state) => state.gridSettings);
 
-    const snapToGrid = (value: number) => {
-      if (!gridSettings.snapToGrid) return value;
-      return Math.round(value / gridSettings.size) * gridSettings.size;
-    };
-
     const handleDragEnd = (e: { target: { x: (val?: number) => number; y: (val?: number) => number } }) => {
       const dx = e.target.x();
       const dy = e.target.y();
@@ -33,9 +28,16 @@ export const LineShape = forwardRef<Konva.Line, LineProps>(
         if (selectedIds.length > 1 && selectedIds.includes(element.id)) {
           useCanvasStore.getState().moveSelectedElements(dx, dy);
         } else {
-          // Single element move
+          // Single element move - snap the delta, not each point
+          const snappedDx = gridSettings.snapToGrid
+            ? Math.round(dx / gridSettings.size) * gridSettings.size
+            : dx;
+          const snappedDy = gridSettings.snapToGrid
+            ? Math.round(dy / gridSettings.size) * gridSettings.size
+            : dy;
+
           const newPoints = element.points.map((p, i) =>
-            i % 2 === 0 ? snapToGrid(p + dx) : snapToGrid(p + dy)
+            i % 2 === 0 ? p + snappedDx : p + snappedDy
           );
           updateElement(element.id, { points: newPoints });
         }
@@ -98,11 +100,6 @@ export const ArrowShape = forwardRef<Konva.Arrow, ArrowProps>(
     const activeTool = useCanvasStore((state) => state.activeTool);
     const gridSettings = useCanvasStore((state) => state.gridSettings);
 
-    const snapToGrid = (value: number) => {
-      if (!gridSettings.snapToGrid) return value;
-      return Math.round(value / gridSettings.size) * gridSettings.size;
-    };
-
     const handleDragEnd = (e: { target: { x: (val?: number) => number; y: (val?: number) => number } }) => {
       const dx = e.target.x();
       const dy = e.target.y();
@@ -114,9 +111,16 @@ export const ArrowShape = forwardRef<Konva.Arrow, ArrowProps>(
         if (selectedIds.length > 1 && selectedIds.includes(element.id)) {
           useCanvasStore.getState().moveSelectedElements(dx, dy);
         } else {
-          // Single element move
+          // Single element move - snap the delta, not each point
+          const snappedDx = gridSettings.snapToGrid
+            ? Math.round(dx / gridSettings.size) * gridSettings.size
+            : dx;
+          const snappedDy = gridSettings.snapToGrid
+            ? Math.round(dy / gridSettings.size) * gridSettings.size
+            : dy;
+
           const newPoints = element.points.map((p, i) =>
-            i % 2 === 0 ? snapToGrid(p + dx) : snapToGrid(p + dy)
+            i % 2 === 0 ? p + snappedDx : p + snappedDy
           );
           updateElement(element.id, { points: newPoints });
         }

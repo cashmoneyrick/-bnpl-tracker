@@ -34,9 +34,17 @@ export const FreehandPath = forwardRef<Konva.Line, FreehandPathProps>(
         if (selectedIds.length > 1 && selectedIds.includes(element.id)) {
           useCanvasStore.getState().moveSelectedElements(dx, dy);
         } else {
-          // Single element move
+          // Single element move - snap the delta, not each point
+          const gridSettings = useCanvasStore.getState().gridSettings;
+          const snappedDx = gridSettings.snapToGrid
+            ? Math.round(dx / gridSettings.size) * gridSettings.size
+            : dx;
+          const snappedDy = gridSettings.snapToGrid
+            ? Math.round(dy / gridSettings.size) * gridSettings.size
+            : dy;
+
           const newPoints = element.points.map((p, i) =>
-            i % 2 === 0 ? p + dx : p + dy
+            i % 2 === 0 ? p + snappedDx : p + snappedDy
           );
           updateElement(element.id, { points: newPoints });
         }
