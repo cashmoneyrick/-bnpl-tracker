@@ -40,6 +40,10 @@ export function CanvasToolbar() {
   const updateToolSettings = useCanvasStore((state) => state.updateToolSettings);
   const selectedElementIds = useCanvasStore((state) => state.selectedElementIds);
   const deleteElements = useCanvasStore((state) => state.deleteElements);
+  const gridSettings = useCanvasStore((state) => state.gridSettings);
+  const updateGridSettings = useCanvasStore((state) => state.updateGridSettings);
+  const toggleSnapToGrid = useCanvasStore((state) => state.toggleSnapToGrid);
+  const toggleGrid = useCanvasStore((state) => state.toggleGrid);
 
   const canUndo = historyIndex > 0;
   const canRedo = historyIndex < history.length - 1;
@@ -338,6 +342,64 @@ export function CanvasToolbar() {
               />
             </svg>
           }
+        />
+
+        {/* Grid Settings */}
+        <div className="w-px h-6 bg-dark-border mx-1" />
+
+        {/* Grid visibility toggle */}
+        <button
+          onClick={toggleGrid}
+          className={`p-2 rounded-lg transition-colors ${
+            gridSettings.showGrid
+              ? 'bg-blue-500/20 text-blue-400'
+              : 'text-gray-400 hover:text-white hover:bg-dark-hover'
+          }`}
+          title="Toggle Grid"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M4 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1V5zm10 0a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zm10 0a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"
+            />
+          </svg>
+        </button>
+
+        {/* Snap to grid toggle */}
+        <button
+          onClick={toggleSnapToGrid}
+          className={`p-2 rounded-lg transition-colors ${
+            gridSettings.snapToGrid
+              ? 'bg-green-500/20 text-green-400'
+              : 'text-gray-400 hover:text-white hover:bg-dark-hover'
+          }`}
+          title={`Snap to Grid: ${gridSettings.snapToGrid ? 'On' : 'Off'}`}
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"
+            />
+          </svg>
+        </button>
+
+        {/* Grid size slider */}
+        <SizeSlider
+          size={gridSettings.size}
+          min={10}
+          max={100}
+          onChange={(size) => updateGridSettings({ size })}
+          label="Grid Size"
+        />
+
+        {/* Grid color picker */}
+        <ColorPicker
+          color={gridSettings.gridColor}
+          onChange={(color) => updateGridSettings({ gridColor: color })}
         />
       </div>
 
