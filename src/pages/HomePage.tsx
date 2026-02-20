@@ -1,10 +1,39 @@
-import { Link } from 'react-router-dom';
+import { useState, useMemo, useEffect } from 'react';
 import { parseISO, isToday, isTomorrow, format } from 'date-fns';
+import {
+  PieChart,
+  Pie,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+} from 'recharts';
 import { useBNPLStore } from '../store';
-import { useTotalAvailableCredit, useOnTimeStreak, useUpcomingPayments } from '../store/selectors';
+import {
+  useTotalAvailableCredit,
+  useOnTimeStreak,
+  useUpcomingPayments,
+  useOnTimeRate,
+  useWeeklyDeployment,
+  useAllPlatformGoals,
+  useTotalLimitGrowth,
+  useArbitrageStats,
+  useArbitrageOrders,
+  useOrdersByType,
+} from '../store/selectors';
 import { formatCurrency } from '../utils/currency';
+import { formatDate } from '../utils/date';
 import { Card } from '../components/shared/Card';
+import { Button } from '../components/shared/Button';
+import { Input } from '../components/shared/Input';
+import { PlatformIcon } from '../components/shared/PlatformIcon';
+import { SummaryCards } from '../components/dashboard/SummaryCards';
+import { OverdueAlerts } from '../components/dashboard/OverdueAlerts';
+import { InsightStrip } from '../components/dashboard/InsightStrip';
+import { OrdersSection } from '../components/dashboard/OrdersSection';
 import { DEFAULT_PLATFORMS, PLATFORM_COLORS } from '../constants/platforms';
+import type { Order, PlatformId } from '../types';
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
 
 function formatDueDate(dateStr: string): string {
   const date = parseISO(dateStr);
@@ -25,25 +54,109 @@ function getBarColor(percent: number): string {
   return 'bg-green-500';
 }
 
+const ORDER_TYPE_COLORS: Record<string, string> = {
+  personal: '#3b82f6',
+  necessity: '#22c55e',
+  arbitrage: '#f59e0b',
+};
+
+// ─── History sub-components ──────────────────────────────────────────────────
+
+function OrderCard({ order }: { order: Order }) {
+  const platforms = useBNPLStore((state) => state.platforms);
+  const deleteOrder = useBNPLStore((state) => state.deleteOrder);
+  const openOrderDetailModal = useBNPLStore((state) => state.openOrderDetailModal);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  const platform = platforms.find((p) => p.id === order.platformId);
+  const isCompleted = order.status === 'completed';
+
+  const handleDelete = async () => {
+    await deleteOrder(order.id);
+    setShowDeleteConfirm(false);
+  };
+
+  return (
+    <Card className={isCompleted ? 'opacity-80' : ''}>
+      <div className="flex items-center gap-4">
+        <div
+          className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
+          style={{ backgroundColor: `${platform?.color}20` }}
+        >
+          <PlatformIcon
+            platformId={order.platformId}
+            size="sm"
+            style={{ color: platform?.color }}
+          />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-medium text-white truncate">
+              {order.storeName || platform?.name || 'Unknown'}
+            </span>
+            {isCompleted && (
+              <span className="flex items-center gap-1 text-xs text-green-400 bg-green-500/10 px-2 py-0.5 rounded-full">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                Paid
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 text-sm text-gray-400">
+            <span className="font-medium text-gray-300">{formatCurrency(order.totalAmount)}</span>
+            <span>·</span>
+            <span>{platform?.name}</span>
+            <span>·</span>
+            <span>{formatDate(order.createdAt)}</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {!showDeleteConfirm ? (
+            <>
+              <Button variant="secondary" size="sm" onClick={() => openOrderDetailModal(order.id)}>
+                View
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowDeleteConfirm(true)}
+                className="text-gray-400 hover:text-red-400"
+              >
+                Delete
+              </Button>
+            </>
+          ) : (
+            <>
+              <span className="text-sm text-gray-400">Delete?</span>
+              <Button variant="danger" size="sm" onClick={handleDelete}>Yes</Button>
+              <Button variant="secondary" size="sm" onClick={() => setShowDeleteConfirm(false)}>No</Button>
+            </>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+// ─── Main Page ───────────────────────────────────────────────────────────────
+
 export function HomePage() {
-  // Store data
   const platforms = useBNPLStore((state) => state.platforms);
   const orders = useBNPLStore((state) => state.orders);
+  const limitHistory = useBNPLStore((state) => state.limitHistory);
   const openQuickAddModal = useBNPLStore((state) => state.openQuickAddModal);
 
-  // Selectors
+  // Credit overview
   const totalAvailable = useTotalAvailableCredit();
   const onTimeStreak = useOnTimeStreak();
   const upcomingPayments = useUpcomingPayments(7);
-
-  // Calculations
   const totalLimit = platforms.reduce((sum, p) => sum + p.creditLimit, 0);
   const usedCredit = totalLimit - totalAvailable;
   const utilizationPercent = totalLimit > 0 ? (usedCredit / totalLimit) * 100 : 0;
   const activeOrders = orders.filter((o) => o.status === 'active').length;
   const dueThisWeek = upcomingPayments.reduce((sum, p) => sum + p.amount, 0);
 
-  // Get store name for a payment
   const getPaymentStoreName = (payment: (typeof upcomingPayments)[0]) => {
     const order = orders.find((o) => o.id === payment.orderId);
     if (order?.storeName) return order.storeName;
@@ -51,15 +164,85 @@ export function HomePage() {
     return platform?.name || 'Unknown';
   };
 
+  // Analytics
+  const onTimeRate = useOnTimeRate();
+  const weeklyDeployment = useWeeklyDeployment();
+  const platformGoals = useAllPlatformGoals();
+  const limitGrowth = useTotalLimitGrowth();
+  const arbitrageStats = useArbitrageStats();
+  const arbitrageOrders = useArbitrageOrders();
+  const hasArbitrageOrders = arbitrageOrders.length > 0;
+  const ordersByType = useOrdersByType();
+
+  const getTrustStatus = () => {
+    if (onTimeRate >= 100) return { message: 'Perfect record', color: 'text-green-400' };
+    if (onTimeRate >= 90) return { message: 'Excellent standing', color: 'text-green-400' };
+    if (onTimeRate >= 75) return { message: 'Good standing', color: 'text-blue-400' };
+    if (onTimeRate >= 50) return { message: 'Needs improvement', color: 'text-amber-400' };
+    return { message: 'Critical - pay on time', color: 'text-red-400' };
+  };
+  const trustStatus = getTrustStatus();
+
+  const orderTypePieData = useMemo(() => {
+    const data = [];
+    if (ordersByType.personal.count > 0)
+      data.push({ name: 'Personal', value: ordersByType.personal.total, color: ORDER_TYPE_COLORS.personal });
+    if (ordersByType.necessity.count > 0)
+      data.push({ name: 'Necessity', value: ordersByType.necessity.total, color: ORDER_TYPE_COLORS.necessity });
+    if (ordersByType.arbitrage.count > 0)
+      data.push({ name: 'Arbitrage', value: ordersByType.arbitrage.total, color: ORDER_TYPE_COLORS.arbitrage });
+    return data;
+  }, [ordersByType]);
+
+  const recentLimitChanges = useMemo(() => {
+    return [...limitHistory]
+      .sort((a, b) => new Date(b.changedAt).getTime() - new Date(a.changedAt).getTime())
+      .slice(0, 5)
+      .map((change) => ({ ...change, platform: platforms.find((p) => p.id === change.platformId) }));
+  }, [limitHistory, platforms]);
+
+  // History
+  const [searchQuery, setSearchQuery] = useState('');
+  const [platformFilter, setPlatformFilter] = useState<PlatformId | 'all'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'completed'>('completed');
+  const [sortBy, setSortBy] = useState<'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc'>('date-desc');
+
+  const filteredOrders = useMemo(() => {
+    return orders
+      .filter((order) => {
+        if (platformFilter !== 'all' && order.platformId !== platformFilter) return false;
+        if (statusFilter !== 'all' && order.status !== statusFilter) return false;
+        if (searchQuery.trim()) {
+          const query = searchQuery.toLowerCase();
+          const platform = platforms.find((p) => p.id === order.platformId);
+          if (!order.storeName?.toLowerCase().includes(query) && !platform?.name.toLowerCase().includes(query))
+            return false;
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        switch (sortBy) {
+          case 'date-asc': return parseISO(a.createdAt).getTime() - parseISO(b.createdAt).getTime();
+          case 'amount-desc': return b.totalAmount - a.totalAmount;
+          case 'amount-asc': return a.totalAmount - b.totalAmount;
+          default: return parseISO(b.createdAt).getTime() - parseISO(a.createdAt).getTime();
+        }
+      });
+  }, [orders, platformFilter, statusFilter, searchQuery, platforms, sortBy]);
+
+  const statusCounts = useMemo(() => ({
+    all: orders.length,
+    active: orders.filter((o) => o.status === 'active').length,
+    completed: orders.filter((o) => o.status === 'completed').length,
+  }), [orders]);
+
   return (
     <div className="space-y-6">
-      {/* Hero Card - Credit Overview */}
+
+      {/* ── Credit Overview Hero ─────────────────────────────────────── */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-dark-card to-dark-bg border border-dark-border p-6">
-        {/* Decorative orbs */}
         <div className="absolute -top-20 -right-20 w-40 h-40 bg-green-500/10 rounded-full blur-3xl" />
         <div className="absolute -bottom-20 -left-20 w-40 h-40 bg-purple-500/10 rounded-full blur-3xl" />
-
-        {/* Streak badge */}
         {onTimeStreak > 0 && (
           <div className="absolute top-4 right-4 flex items-center gap-1 bg-amber-500/20 text-amber-400 px-2 py-1 rounded-full text-sm font-medium">
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
@@ -68,8 +251,6 @@ export function HomePage() {
             <span>{onTimeStreak}</span>
           </div>
         )}
-
-        {/* Metrics grid */}
         <div className="relative grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
           <div>
             <p className="text-gray-400 text-sm">Available Credit</p>
@@ -77,9 +258,7 @@ export function HomePage() {
           </div>
           <div>
             <p className="text-gray-400 text-sm">Used Credit</p>
-            <p className={`text-2xl font-bold ${getUtilizationColor(utilizationPercent)}`}>
-              {formatCurrency(usedCredit)}
-            </p>
+            <p className={`text-2xl font-bold ${getUtilizationColor(utilizationPercent)}`}>{formatCurrency(usedCredit)}</p>
           </div>
           <div>
             <p className="text-gray-400 text-sm">Due This Week</p>
@@ -90,8 +269,6 @@ export function HomePage() {
             <p className="text-2xl font-bold text-white">{activeOrders}</p>
           </div>
         </div>
-
-        {/* Utilization bar */}
         <div className="relative">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm text-gray-400">Credit Utilization</span>
@@ -108,156 +285,22 @@ export function HomePage() {
         </div>
       </div>
 
-      {/* Quick Actions Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Budgeting Card */}
-        <Card padding="lg">
-          <div className="flex items-start gap-4 mb-4">
-            <div className="p-3 bg-green-500/10 rounded-lg">
-              <svg className="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold text-white">Budgeting</h2>
-              <p className="text-sm text-gray-400">BNPL tracking & analytics</p>
-            </div>
-          </div>
+      {/* ── Dashboard Sections ───────────────────────────────────────── */}
+      <OverdueAlerts />
+      <SummaryCards />
+      <InsightStrip />
 
-          <div className="space-y-3">
-            <button
-              onClick={openQuickAddModal}
-              className="w-full flex items-center gap-3 p-3 bg-green-500/10 hover:bg-green-500/20 rounded-xl transition-colors group"
-            >
-              <div className="p-2 bg-green-500/20 rounded-lg group-hover:bg-green-500/30 transition-colors">
-                <svg className="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-              </div>
-              <div className="text-left">
-                <p className="font-medium text-white">Add Order</p>
-                <p className="text-xs text-gray-400">Screenshot or manual entry</p>
-              </div>
-            </button>
-
-            <Link
-              to="/budgeting"
-              className="w-full flex items-center gap-3 p-3 bg-dark-hover hover:bg-dark-border rounded-xl transition-colors group"
-            >
-              <div className="p-2 bg-dark-border rounded-lg group-hover:bg-dark-hover transition-colors">
-                <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-                  />
-                </svg>
-              </div>
-              <div className="text-left">
-                <p className="font-medium text-white">Upcoming Payments</p>
-                <p className="text-xs text-gray-400">
-                  {upcomingPayments.length > 0
-                    ? `${upcomingPayments.length} due this week`
-                    : 'View calendar'}
-                </p>
-              </div>
-            </Link>
-          </div>
-
-          <Link
-            to="/budgeting"
-            className="inline-block mt-4 text-sm text-gray-400 hover:text-white transition-colors"
-          >
-            Go to Dashboard &rarr;
-          </Link>
-        </Card>
-
-        {/* Canvas Card */}
-        <Card padding="lg">
-          <div className="flex items-start gap-4 mb-4">
-            <div className="p-3 bg-purple-500/10 rounded-lg">
-              <svg className="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"
-                />
-              </svg>
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold text-white">Canvas</h2>
-              <p className="text-sm text-gray-400">Mindmaps & freeform thinking</p>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            <Link
-              to="/canvas"
-              className="w-full flex items-center gap-3 p-3 bg-purple-500/10 hover:bg-purple-500/20 rounded-xl transition-colors group"
-            >
-              <div className="p-2 bg-purple-500/20 rounded-lg group-hover:bg-purple-500/30 transition-colors">
-                <svg className="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                  />
-                </svg>
-              </div>
-              <div className="text-left">
-                <p className="font-medium text-white">Open Canvas</p>
-                <p className="text-xs text-gray-400">Draw, write, and brainstorm</p>
-              </div>
-            </Link>
-
-            <div className="w-full flex items-center gap-3 p-3 border border-dashed border-dark-border rounded-xl opacity-50">
-              <div className="p-2 bg-dark-hover rounded-lg">
-                <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"
-                  />
-                </svg>
-              </div>
-              <div className="text-left">
-                <p className="font-medium text-gray-500">Mindmap Mode</p>
-                <p className="text-xs text-gray-600">Coming soon</p>
-              </div>
-            </div>
-          </div>
-        </Card>
-      </div>
-
-      {/* Next Up Section */}
+      {/* ── Next Up ──────────────────────────────────────────────────── */}
       {upcomingPayments.length > 0 && (
         <div>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-white">Next Up</h2>
-            <Link to="/budgeting" className="text-sm text-gray-400 hover:text-white transition-colors">
-              View all &rarr;
-            </Link>
-          </div>
-
+          <h2 className="text-lg font-semibold text-white mb-4">Next Up</h2>
           <div className="space-y-2">
             {upcomingPayments.slice(0, 3).map((payment) => {
               const platformColor = PLATFORM_COLORS[payment.platformId] || '#6b7280';
               return (
                 <Card key={payment.id} padding="sm" className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div
-                      className="w-3 h-3 rounded-full"
-                      style={{ backgroundColor: platformColor }}
-                    />
+                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: platformColor }} />
                     <div>
                       <p className="font-medium text-white">{getPaymentStoreName(payment)}</p>
                       <p className="text-xs text-gray-400">{formatDueDate(payment.dueDate)}</p>
@@ -270,6 +313,391 @@ export function HomePage() {
           </div>
         </div>
       )}
+
+      {/* ── Orders ───────────────────────────────────────────────────── */}
+      <OrdersSection />
+
+      {/* ── Add Order Button ─────────────────────────────────────────── */}
+      <div>
+        <button
+          onClick={openQuickAddModal}
+          className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+          </svg>
+          Add Order
+        </button>
+      </div>
+
+      {/* ── Capital Strategy (Analytics) ─────────────────────────────── */}
+      <div>
+        <h2 className="text-2xl font-bold text-white mb-1">Capital Strategy</h2>
+        <p className="text-gray-400 mb-6">Track your credit-building progress and deployment</p>
+
+        {/* Trust Score */}
+        <Card className="bg-gradient-to-br from-green-500/10 to-transparent mb-6">
+          <h3 className="text-lg font-semibold text-white mb-4">Trust Score</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div>
+              <p className="text-4xl font-bold text-white">{Math.round(onTimeRate)}%</p>
+              <p className="text-sm text-gray-400 mt-1">On-Time Payment Rate</p>
+            </div>
+            <div className="flex flex-col items-start">
+              <div className="flex items-center gap-2">
+                <svg className="w-6 h-6 text-amber-400" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12.9 2.6l2.3 5a1 1 0 00.8.5l5.4.5a1 1 0 01.6 1.7l-4.1 3.5a1 1 0 00-.3 1l1.2 5.3a1 1 0 01-1.5 1.1L12.4 18a1 1 0 00-1 0l-4.8 2.9a1 1 0 01-1.5-1.1l1.2-5.3a1 1 0 00-.3-1L2 10.3a1 1 0 01.6-1.7l5.4-.5a1 1 0 00.8-.5l2.3-5a1 1 0 011.8 0z" />
+                </svg>
+                <p className="text-3xl font-bold text-white">{onTimeStreak}</p>
+              </div>
+              <p className="text-sm text-gray-400 mt-1">Consecutive on-time payments</p>
+            </div>
+            <div>
+              <p className={`text-xl font-semibold ${trustStatus.color}`}>{trustStatus.message}</p>
+              <p className="text-sm text-gray-400 mt-1">Current Status</p>
+            </div>
+          </div>
+        </Card>
+
+        {/* Available Capital */}
+        <Card className="mb-6">
+          <h3 className="text-lg font-semibold text-white mb-4">Available Capital</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <p className="text-3xl font-bold text-white">{formatCurrency(totalAvailable)}</p>
+              <p className="text-sm text-gray-400 mt-1">Total Available Credit</p>
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm text-gray-400">Weekly Deployment</p>
+                <p className="text-white font-medium">{formatCurrency(weeklyDeployment.amount)}</p>
+              </div>
+              <div className="h-3 bg-dark-card rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${
+                    weeklyDeployment.isOverExtended ? 'bg-red-500' : weeklyDeployment.warningThreshold ? 'bg-amber-500' : 'bg-green-500'
+                  }`}
+                  style={{ width: `${Math.min((weeklyDeployment.amount / 60000) * 100, 100)}%` }}
+                />
+              </div>
+              <div className="flex justify-between mt-1">
+                <p className="text-xs text-gray-500">$0</p>
+                <p className="text-xs text-gray-500">$600</p>
+              </div>
+              {weeklyDeployment.isOverExtended && (
+                <p className="text-sm text-red-400 mt-2">Warning: Over $600 deployed this week</p>
+              )}
+              {!weeklyDeployment.isOverExtended && weeklyDeployment.warningThreshold && (
+                <p className="text-sm text-amber-400 mt-2">Approaching weekly limit threshold</p>
+              )}
+            </div>
+          </div>
+        </Card>
+
+        {/* Platform Goals */}
+        <Card className="mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-white">Platform Goals</h3>
+          </div>
+          {platformGoals.flexible.length > 0 && (
+            <div className="mb-6">
+              <p className="text-sm font-medium text-blue-400 mb-3">Flexible (Virtual Visa)</p>
+              <div className="space-y-3">
+                {platformGoals.flexible.map(({ platform, currentLimit, goalLimit, progress }) => (
+                  <div key={platform.id}>
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-2">
+                        <span className="w-3 h-3 rounded-full" style={{ backgroundColor: platform.color }} />
+                        <span className="text-white text-sm">{platform.name}</span>
+                      </div>
+                      <span className="text-gray-400 text-sm">{formatCurrency(currentLimit)} / {formatCurrency(goalLimit)}</span>
+                    </div>
+                    <div className="h-2 bg-dark-card rounded-full overflow-hidden">
+                      <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(progress, 100)}%`, backgroundColor: platform.color }} />
+                    </div>
+                    {progress >= 100 && <p className="text-xs text-green-400 mt-1">Goal reached!</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {platformGoals.limited.length > 0 && (
+            <div>
+              <p className="text-sm font-medium text-amber-400 mb-3">Limited (Merchant-specific)</p>
+              <div className="space-y-3">
+                {platformGoals.limited.map(({ platform, currentLimit, goalLimit, progress }) => (
+                  <div key={platform.id}>
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-2">
+                        <span className="w-3 h-3 rounded-full" style={{ backgroundColor: platform.color }} />
+                        <span className="text-white text-sm">{platform.name}</span>
+                      </div>
+                      <span className="text-gray-400 text-sm">{formatCurrency(currentLimit)} / {formatCurrency(goalLimit)}</span>
+                    </div>
+                    <div className="h-2 bg-dark-card rounded-full overflow-hidden">
+                      <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(progress, 100)}%`, backgroundColor: platform.color }} />
+                    </div>
+                    {progress >= 100 && <p className="text-xs text-green-400 mt-1">Goal reached!</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {platformGoals.flexible.length === 0 && platformGoals.limited.length === 0 && (
+            <p className="text-gray-500 text-sm">No goals set. Set platform goals in Settings to track your progress.</p>
+          )}
+        </Card>
+
+        {/* Limit Growth */}
+        <Card className="mb-6">
+          <h3 className="text-lg font-semibold text-white mb-4">Limit Growth</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 p-4 bg-dark-hover rounded-lg">
+            <div>
+              <p className="text-sm text-gray-400">Starting Total</p>
+              <p className="text-xl font-semibold text-white">{formatCurrency(limitGrowth.startingTotal)}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-400">Current Total</p>
+              <p className="text-xl font-semibold text-white">{formatCurrency(limitGrowth.currentTotal)}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-400">Total Growth</p>
+              <p className={`text-xl font-semibold ${limitGrowth.growthAmount >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {limitGrowth.growthAmount >= 0 ? '+' : ''}{formatCurrency(limitGrowth.growthAmount)}
+                {limitGrowth.growthPercent > 0 && <span className="text-sm ml-1">({limitGrowth.growthPercent.toFixed(0)}%)</span>}
+              </p>
+            </div>
+          </div>
+          {recentLimitChanges.length > 0 ? (
+            <div>
+              <p className="text-sm text-gray-400 mb-3">Recent Limit Increases</p>
+              <div className="space-y-2">
+                {recentLimitChanges.map((change) => {
+                  const increase = change.newLimit - change.previousLimit;
+                  return (
+                    <div key={change.id} className="flex items-center justify-between py-2 border-b border-dark-border last:border-0">
+                      <div className="flex items-center gap-3">
+                        {change.platform && <span className="w-3 h-3 rounded-full" style={{ backgroundColor: change.platform.color }} />}
+                        <div>
+                          <p className="text-white text-sm">{change.platform?.name || change.platformId}</p>
+                          <p className="text-xs text-gray-500">
+                            {format(parseISO(change.changedAt), 'MMM d, yyyy')} · {change.onTimeStreakAtChange} on-time streak
+                          </p>
+                        </div>
+                      </div>
+                      <p className={`text-sm font-medium ${increase >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {increase >= 0 ? '+' : ''}{formatCurrency(increase)}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <p className="text-gray-500 text-sm">No limit changes recorded yet.</p>
+          )}
+        </Card>
+
+        {/* Arbitrage Performance */}
+        {hasArbitrageOrders && (
+          <Card className="bg-gradient-to-br from-amber-500/10 to-transparent mb-6">
+            <h3 className="text-lg font-semibold text-white mb-4">Arbitrage Performance</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+              <div>
+                <p className="text-sm text-gray-400">Total Deployed</p>
+                <p className="text-xl font-semibold text-white">{formatCurrency(arbitrageStats.totalPurchased)}</p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-400">Total Sales</p>
+                <p className="text-xl font-semibold text-white">{formatCurrency(arbitrageStats.totalSaleAmount)}</p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-400">Net Cash</p>
+                <p className={`text-xl font-semibold ${arbitrageStats.totalNetCash >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {arbitrageStats.totalNetCash >= 0 ? '+' : ''}{formatCurrency(Math.abs(arbitrageStats.totalNetCash))}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-400">Avg Cost of Capital</p>
+                <p className="text-xl font-semibold text-white">
+                  {arbitrageStats.averageCostOfCapital > 0 ? `${arbitrageStats.averageCostOfCapital.toFixed(1)}%` : '0%'}
+                </p>
+              </div>
+            </div>
+            {arbitrageStats.pendingSales > 0 && (
+              <p className="text-sm text-amber-400 mb-4">
+                {arbitrageStats.pendingSales} order{arbitrageStats.pendingSales > 1 ? 's' : ''} pending sale
+              </p>
+            )}
+            {arbitrageOrders.length > 0 && (
+              <div>
+                <p className="text-sm text-gray-400 mb-3">Recent Orders</p>
+                <div className="space-y-2">
+                  {arbitrageOrders.slice(0, 5).map((order) => {
+                    const platform = platforms.find((p) => p.id === order.platformId);
+                    return (
+                      <div key={order.id} className="flex items-center justify-between py-2 border-b border-amber-500/20 last:border-0">
+                        <div className="flex items-center gap-3">
+                          {platform && <span className="w-3 h-3 rounded-full" style={{ backgroundColor: platform.color }} />}
+                          <div>
+                            <p className="text-white text-sm">{order.storeName || platform?.name || order.platformId}</p>
+                            <p className="text-xs text-gray-500">{formatCurrency(order.totalAmount)} purchase</p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          {order.saleAmount ? (
+                            <>
+                              <p className={`text-sm font-medium ${order.isProfitable ? 'text-green-400' : 'text-red-400'}`}>
+                                {order.netCash >= 0 ? '+' : ''}{formatCurrency(order.netCash)}
+                              </p>
+                              {!order.isProfitable && <p className="text-xs text-gray-500">{order.costOfCapitalPercent.toFixed(1)}% cost</p>}
+                            </>
+                          ) : (
+                            <p className="text-sm text-gray-500">Pending sale</p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </Card>
+        )}
+
+        {/* Order Breakdown */}
+        <Card>
+          <h3 className="text-lg font-semibold text-white mb-4">Order Breakdown</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {orderTypePieData.length > 0 ? (
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={orderTypePieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={2}>
+                      {orderTypePieData.map((entry, index) => <Cell key={index} fill={entry.color} />)}
+                    </Pie>
+                    <Tooltip
+                      formatter={(value) => formatCurrency(Number(value))}
+                      contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #262626', borderRadius: '8px' }}
+                      labelStyle={{ color: '#fff' }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="h-64 flex items-center justify-center text-gray-500">No orders yet</div>
+            )}
+            <div className="flex flex-col justify-center space-y-4">
+              {[
+                { key: 'personal', label: 'Personal' },
+                { key: 'necessity', label: 'Necessity' },
+                { key: 'arbitrage', label: 'Arbitrage' },
+              ].map(({ key, label }) => (
+                <div key={key} className="flex items-center gap-3">
+                  <span className="w-4 h-4 rounded-full" style={{ backgroundColor: ORDER_TYPE_COLORS[key] }} />
+                  <div className="flex-1">
+                    <p className="text-white">{label}</p>
+                    <p className="text-sm text-gray-400">
+                      {ordersByType[key as keyof typeof ordersByType].count} orders · {formatCurrency(ordersByType[key as keyof typeof ordersByType].total)}
+                    </p>
+                  </div>
+                </div>
+              ))}
+              <div className="pt-4 border-t border-dark-border">
+                <p className="text-sm text-gray-400">Total Deployed (All Time)</p>
+                <p className="text-2xl font-bold text-white">
+                  {formatCurrency(ordersByType.personal.total + ordersByType.necessity.total + ordersByType.arbitrage.total)}
+                </p>
+              </div>
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      {/* ── Payment History ───────────────────────────────────────────── */}
+      <div>
+        <h2 className="text-2xl font-bold text-white mb-1">Payment History</h2>
+        <p className="text-gray-400 mb-6">View your completed and past orders</p>
+
+        <Card padding="md" className="mb-4">
+          <div className="space-y-4">
+            <div className="flex flex-col md:flex-row gap-3">
+              <div className="flex-1 relative">
+                <Input
+                  placeholder="Search by store or platform..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+              <select
+                value={platformFilter}
+                onChange={(e) => setPlatformFilter(e.target.value as PlatformId | 'all')}
+                className="px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="all">All Platforms</option>
+                {platforms.map((platform) => (
+                  <option key={platform.id} value={platform.id}>{platform.name}</option>
+                ))}
+              </select>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+                className="px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="date-desc">Newest First</option>
+                <option value="date-asc">Oldest First</option>
+                <option value="amount-desc">Highest Amount</option>
+                <option value="amount-asc">Lowest Amount</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              {(['completed', 'active', 'all'] as const).map((status) => (
+                <button
+                  key={status}
+                  onClick={() => setStatusFilter(status)}
+                  className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
+                    statusFilter === status
+                      ? 'bg-blue-500/20 text-blue-400 border border-blue-500/50'
+                      : 'bg-dark-hover text-gray-400 border border-dark-border hover:border-gray-600'
+                  }`}
+                >
+                  {status === 'all' ? 'All' : status.charAt(0).toUpperCase() + status.slice(1)}
+                  <span className="ml-1.5 text-xs opacity-60">({statusCounts[status]})</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </Card>
+
+        {filteredOrders.length === 0 ? (
+          <Card>
+            <div className="text-center py-12">
+              <svg className="w-12 h-12 text-gray-600 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+              </svg>
+              <p className="text-gray-400">
+                {orders.length === 0 ? 'No orders yet' : statusFilter === 'completed' ? 'No completed orders yet' : 'No orders match your filters'}
+              </p>
+            </div>
+          </Card>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-sm text-gray-500">{filteredOrders.length} order{filteredOrders.length !== 1 ? 's' : ''}</p>
+            {filteredOrders.map((order) => <OrderCard key={order.id} order={order} />)}
+          </div>
+        )}
+      </div>
+
     </div>
   );
 }
