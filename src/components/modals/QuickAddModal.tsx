@@ -14,7 +14,8 @@ import {
 import { formatDateInput, isValidDateString } from '../../utils/date';
 import { parseISO, format } from 'date-fns';
 import { ORDER_TAG_OPTIONS, type PlatformId, type OrderType } from '../../types';
-import { AFFIRM_INSTALLMENT_OPTIONS } from '../../constants/platforms';
+import { AFFIRM_INSTALLMENT_OPTIONS, getEnrichedPlatform, PLATFORM_CONFIGS, type BNPLPlan } from '../../constants/platforms';
+import { usePlatformRecommendations } from '../../store/selectors';
 
 // Order type options for the selector
 const ORDER_TYPE_OPTIONS: Array<{ value: OrderType; label: string; color: string; bgColor: string }> = [
@@ -48,6 +49,9 @@ export function QuickAddModal() {
   // Payment frequency (0 means use platform default)
   const [intervalDays, setIntervalDays] = useState(0);
   const [showCustomInterval, setShowCustomInterval] = useState(false);
+
+  // Plan selection
+  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
 
   // Frequency options
   const FREQUENCY_OPTIONS = [
@@ -335,10 +339,74 @@ export function QuickAddModal() {
   // Get platform
   const platform = platforms.find((p) => p.id === platformId);
 
-  // Parse amount
+  // Enriched platform with static config (plans, shopAnywhere, etc.)
+  const enrichedPlatform = useMemo(
+    () => (platform ? getEnrichedPlatform(platform) : null),
+    [platform]
+  );
+
+  // Available plans for the selected platform, with eligibility info
   const amountInCents = useMemo(() => {
     return parseDollarInput(amountInput);
   }, [amountInput]);
+
+  const availablePlans = useMemo(() => {
+    if (!enrichedPlatform) return [];
+    return enrichedPlatform.plans.map((plan) => ({
+      ...plan,
+      isEligible: !amountInCents || amountInCents >= plan.minimumOrder,
+      disabledReason:
+        amountInCents && amountInCents < plan.minimumOrder
+          ? `Minimum $${(plan.minimumOrder / 100).toFixed(2)} required`
+          : undefined,
+    }));
+  }, [enrichedPlatform, amountInCents]);
+
+  // Recommendations (only when amount is entered)
+  const recommendations = usePlatformRecommendations(amountInCents || 0);
+  const topRecommendations = useMemo(
+    () => recommendations.filter((r) => r.eligible).slice(0, 3),
+    [recommendations]
+  );
+
+  // Auto-select default plan when platform changes
+  useEffect(() => {
+    if (isApplyingJsonRef.current) return;
+    const config = PLATFORM_CONFIGS[platformId];
+    const defaultPlan = config?.plans.find((p) => p.isDefault);
+    if (defaultPlan) {
+      setSelectedPlanId(defaultPlan.id);
+      setCustomInstallments(defaultPlan.installments);
+      setIntervalDays(defaultPlan.intervalDays);
+      setShowCustomInterval(false);
+    } else {
+      setSelectedPlanId(null);
+    }
+  }, [platformId]);
+
+  // Handle plan selection
+  const handleSelectPlan = (plan: BNPLPlan) => {
+    setSelectedPlanId(plan.id);
+    setCustomInstallments(plan.installments);
+    setIntervalDays(plan.intervalDays);
+    setShowCustomInterval(false);
+    setOverrides({});
+  };
+
+  // Handle recommendation click
+  const handleSelectRecommendation = (rec: (typeof recommendations)[0]) => {
+    setPlatformId(rec.platformId as PlatformId);
+    if (rec.plan) {
+      // Defer plan selection to after platformId state updates
+      setTimeout(() => {
+        setSelectedPlanId(rec.plan!.id);
+        setCustomInstallments(rec.plan!.installments);
+        setIntervalDays(rec.plan!.intervalDays);
+        setShowCustomInterval(false);
+        setOverrides({});
+      }, 0);
+    }
+  };
 
   // Calculate payments
   const calculatedPayments = useMemo(() => {
@@ -462,6 +530,7 @@ export function QuickAddModal() {
       setOrderType('personal');
       setSaleAmountInput('');
       setOverrides({});
+      setSelectedPlanId(null);
       setShowAdvanced(false);
       setShowJsonInput(false);
       setJsonInput('');
@@ -637,6 +706,7 @@ export function QuickAddModal() {
           platformId === 'affirm' && parseFloat(aprInput) > 0
             ? parseFloat(aprInput) / 100
             : undefined,
+        planId: selectedPlanId || undefined,
         paymentOverrides:
           Object.keys(overrides).length > 0 ? overrides : undefined,
         orderType,
@@ -802,6 +872,59 @@ export function QuickAddModal() {
           }
         />
 
+        {/* Recommended Platforms */}
+        {amountInCents > 0 && topRecommendations.length > 0 && (
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Recommended
+            </label>
+            <div className="space-y-2">
+              {topRecommendations.map((rec) => (
+                <button
+                  key={`${rec.platformId}-${rec.plan?.id || 'custom'}`}
+                  type="button"
+                  onClick={() => handleSelectRecommendation(rec)}
+                  className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-colors text-left ${
+                    platformId === rec.platformId && selectedPlanId === rec.plan?.id
+                      ? 'border-blue-500 bg-blue-500/10'
+                      : 'border-dark-border bg-dark-card hover:border-gray-600'
+                  }`}
+                >
+                  <span
+                    className="w-3 h-3 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: rec.platform.color }}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-white text-sm">
+                        {rec.platform.name}
+                      </span>
+                      {rec.plan && (
+                        <span className="text-xs text-gray-400">
+                          {rec.plan.label}
+                        </span>
+                      )}
+                      {!rec.platform.shopAnywhere && (
+                        <span className="text-xs text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">
+                          Approved vendors
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex gap-2 mt-0.5">
+                      {rec.scoreReasons.slice(0, 3).map((reason, i) => (
+                        <span key={i} className="text-xs text-gray-500">
+                          {reason}
+                          {i < Math.min(rec.scoreReasons.length, 3) - 1 && ' ·'}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Expected Sale Amount (for arbitrage orders) */}
         {orderType === 'arbitrage' && (
           <Input
@@ -820,6 +943,68 @@ export function QuickAddModal() {
           value={firstPaymentDate}
           onChange={(e) => setFirstPaymentDate(e.target.value)}
         />
+
+        {/* Plan Selection (only for platforms with predefined plans) */}
+        {enrichedPlatform && enrichedPlatform.plans.length > 0 && (
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Payment Plan
+            </label>
+            <div className="space-y-2">
+              {availablePlans.map((plan) => (
+                <button
+                  key={plan.id}
+                  type="button"
+                  disabled={!plan.isEligible}
+                  onClick={() => plan.isEligible && handleSelectPlan(plan)}
+                  className={`w-full flex items-center justify-between p-3 rounded-lg border transition-colors text-left ${
+                    selectedPlanId === plan.id
+                      ? 'border-blue-500 bg-blue-500/10'
+                      : plan.isEligible
+                      ? 'border-dark-border bg-dark-card hover:border-gray-600'
+                      : 'border-dark-border bg-dark-card opacity-50 cursor-not-allowed'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="font-medium text-white text-sm">
+                      {plan.label}
+                    </span>
+                    <span className="text-xs text-gray-400">
+                      every {plan.intervalDays}d
+                    </span>
+                    {plan.hasInterest && (
+                      <span className="text-xs text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">
+                        Interest
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-right">
+                    {plan.isEligible ? (
+                      plan.minimumOrder > 0 && (
+                        <span className="text-xs text-gray-500">
+                          min ${(plan.minimumOrder / 100).toFixed(0)}
+                        </span>
+                      )
+                    ) : (
+                      <span className="text-xs text-red-400">
+                        {plan.disabledReason}
+                      </span>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+            {/* Interest warning */}
+            {selectedPlanId && availablePlans.find((p) => p.id === selectedPlanId)?.hasInterest && (
+              <p className="mt-2 text-sm text-amber-400 flex items-center gap-1.5">
+                <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                This plan charges interest
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Payment Frequency */}
         <div>

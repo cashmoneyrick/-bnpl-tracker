@@ -23,6 +23,8 @@ import type {
   LimitChange,
 } from '../types';
 import type { PlatformTier } from '../constants/platforms';
+import { getEnrichedPlatform } from '../constants/platforms';
+import { getRecommendations, type PlatformRecommendation } from '../services/platformRecommender';
 
 /**
  * Get total amount owed across all platforms
@@ -1047,4 +1049,20 @@ export function useOrdersByType(): OrderTypeBreakdown {
 
     return breakdown;
   }, [orders]);
+}
+
+/**
+ * Get platform recommendations for a given order amount.
+ * Returns ranked platform+plan combinations sorted by score.
+ */
+export function usePlatformRecommendations(orderAmount: number): PlatformRecommendation[] {
+  const platforms = useBNPLStore((state) => state.platforms);
+  const payments = useBNPLStore((state) => state.payments);
+
+  return useMemo(() => {
+    if (orderAmount <= 0) return [];
+
+    const enriched = platforms.map(getEnrichedPlatform);
+    return getRecommendations(orderAmount, enriched, payments);
+  }, [orderAmount, platforms, payments]);
 }

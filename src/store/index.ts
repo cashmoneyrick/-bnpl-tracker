@@ -13,7 +13,7 @@ import type {
 } from '../types';
 import type { PlatformTier } from '../constants/platforms';
 import { storage } from '../services/storage';
-import { migrateToV2 } from '../services/migrations';
+import { migrateToV2, migrateToV3 } from '../services/migrations';
 import {
   calculatePayments,
   shiftPaymentDates,
@@ -124,17 +124,21 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
       ]);
 
       // Apply migrations
-      const migrated = migrateToV2({ orders, platforms });
+      const migratedV2 = migrateToV2({ orders, platforms });
+      const migrated = migrateToV3({
+        orders: migratedV2.orders,
+        platforms: migratedV2.platforms,
+      });
 
       // Save migrated data if changed
-      if (migrated.ordersChanged) {
-        console.log('[Store] Migrating orders to v2 schema...');
+      if (migratedV2.ordersChanged || migrated.ordersChanged) {
+        console.log('[Store] Migrating orders...');
         for (const order of migrated.orders) {
           await storage.saveOrder(order);
         }
       }
-      if (migrated.platformsChanged) {
-        console.log('[Store] Migrating platforms to v2 schema...');
+      if (migratedV2.platformsChanged || migrated.platformsChanged) {
+        console.log('[Store] Migrating platforms...');
         for (const platform of migrated.platforms) {
           await storage.savePlatform(platform);
         }
@@ -209,6 +213,7 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
       intervalDays: input.intervalDays, // Store per-order interval if provided
       customInstallments: input.customInstallments,
       apr: input.apr,
+      planId: input.planId,
       orderType: input.orderType || 'personal',
       saleAmount: input.saleAmount,
       saleDate: input.saleDate,
@@ -798,13 +803,17 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
     ]);
 
     // Apply migrations to imported data
-    const migrated = migrateToV2({ orders, platforms });
-    if (migrated.ordersChanged) {
+    const migratedV2 = migrateToV2({ orders, platforms });
+    const migrated = migrateToV3({
+      orders: migratedV2.orders,
+      platforms: migratedV2.platforms,
+    });
+    if (migratedV2.ordersChanged || migrated.ordersChanged) {
       for (const order of migrated.orders) {
         await storage.saveOrder(order);
       }
     }
-    if (migrated.platformsChanged) {
+    if (migratedV2.platformsChanged || migrated.platformsChanged) {
       for (const platform of migrated.platforms) {
         await storage.savePlatform(platform);
       }

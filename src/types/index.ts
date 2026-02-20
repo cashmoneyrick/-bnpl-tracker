@@ -1,8 +1,8 @@
 // Import platform types from constants (single source of truth)
-import type { PlatformId, Platform, Subscription, PlatformTier } from '../constants/platforms';
+import type { PlatformId, Platform, Subscription, PlatformTier, BNPLPlan, PlatformConfig, EnrichedPlatform } from '../constants/platforms';
 
 // Re-export for consumers
-export type { PlatformId, Platform, Subscription, PlatformTier };
+export type { PlatformId, Platform, Subscription, PlatformTier, BNPLPlan, PlatformConfig, EnrichedPlatform };
 
 // Order type classification
 export type OrderType = 'necessity' | 'arbitrage' | 'personal';
@@ -31,6 +31,7 @@ export interface Order {
   intervalDays?: number; // Days between payments, overrides platform default
   customInstallments?: number; // For Affirm or custom schedules
   apr?: number; // e.g., 0.15 = 15% (Affirm-specific)
+  planId?: string; // ID of the BNPLPlan used (from platform.plans)
   // Order classification (for analytics)
   orderType?: OrderType; // defaults to 'personal'
   // Arbitrage tracking (when orderType === 'arbitrage')
@@ -74,6 +75,7 @@ export interface NewOrderInput {
   intervalDays?: number; // Days between payments, overrides platform default
   customInstallments?: number; // for Affirm or custom schedules
   apr?: number; // for Affirm
+  planId?: string; // ID of the BNPLPlan selected
   paymentOverrides?: Record<number, { amount?: number; dueDate?: string }>; // installmentNumber -> overrides
   orderType?: OrderType; // defaults to 'personal'
   saleAmount?: number; // for arbitrage orders

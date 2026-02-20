@@ -9,6 +9,7 @@ import { formatCurrency, parseDollarInput, formatNumberInput } from '../../utils
 import { formatDateInput } from '../../utils/date';
 import { format, parseISO } from 'date-fns';
 import { ORDER_TAG_OPTIONS, type PlatformId, type Order, type OrderType } from '../../types';
+import { getEnrichedPlatform, getPlanById, findMatchingPlan } from '../../constants/platforms';
 
 export function OrderDetailModal() {
   const { showToast } = useToast();
@@ -283,6 +284,20 @@ export function OrderDetailModal() {
     : null;
   const isArbitrageOrder = order.orderType === 'arbitrage';
   const orderTypeInfo = ORDER_TYPE_OPTIONS.find(o => o.value === (order.orderType || 'personal'));
+
+  // Derive plan info for this order
+  const enrichedPlatform = getEnrichedPlatform(platform);
+  const orderPlan = order.planId
+    ? getPlanById(order.platformId, order.planId)
+    : findMatchingPlan(
+        order.platformId,
+        order.customInstallments || platform.defaultInstallments,
+        order.intervalDays || platform.defaultIntervalDays
+      );
+  const progressionMet =
+    enrichedPlatform.progressionMinimum > 0
+      ? order.totalAmount >= enrichedPlatform.progressionMinimum
+      : true;
 
   // Payment editing
   const handleStartEditPayment = (paymentId: string) => {
@@ -710,6 +725,38 @@ export function OrderDetailModal() {
             )}
           </div>
         </div>
+
+        {/* Plan & Progression Info */}
+        {(orderPlan || enrichedPlatform.plans.length > 0) && (
+          <div className="flex items-center gap-3 px-4 py-3 bg-dark-hover rounded-lg">
+            {orderPlan && (
+              <span className="text-sm text-white font-medium">
+                {orderPlan.label}
+              </span>
+            )}
+            {orderPlan?.hasInterest && (
+              <span className="text-xs text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">
+                Interest
+              </span>
+            )}
+            {enrichedPlatform.progressionMinimum > 0 && (
+              <span className={`text-xs px-1.5 py-0.5 rounded ${
+                progressionMet
+                  ? 'text-green-400 bg-green-500/10'
+                  : 'text-gray-400 bg-dark-card'
+              }`}>
+                {progressionMet
+                  ? 'Counts toward limit increase'
+                  : `Below $${(enrichedPlatform.progressionMinimum / 100).toFixed(0)} minimum`}
+              </span>
+            )}
+            {enrichedPlatform.progressionMinimum === 0 && enrichedPlatform.plans.length > 0 && (
+              <span className="text-xs text-green-400 bg-green-500/10 px-1.5 py-0.5 rounded">
+                Counts toward limit increase
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Arbitrage Section - only show for arbitrage orders */}
         {isArbitrageOrder && (

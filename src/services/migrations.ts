@@ -4,7 +4,7 @@
 
 import type { Order, Platform, PlatformId } from '../types';
 import type { PlatformTier } from '../constants/platforms';
-import { DEFAULT_PLATFORM_GOALS, DEFAULT_PLATFORM_TIERS } from '../constants/platforms';
+import { DEFAULT_PLATFORM_GOALS, DEFAULT_PLATFORM_TIERS, findMatchingPlan } from '../constants/platforms';
 
 export interface MigrationContext {
   orders: Order[];
@@ -73,5 +73,59 @@ export function migrateToV2(data: MigrationContext): {
     platforms: migratedPlatforms,
     ordersChanged,
     platformsChanged,
+  };
+}
+
+/**
+ * Migrate data to v3 schema:
+ * - Backfill planId on orders by matching installments + intervalDays to known plans
+ * - Best-effort: if no match found, planId stays undefined
+ */
+export function migrateToV3(data: MigrationContext): {
+  orders: Order[];
+  platforms: Platform[];
+  ordersChanged: boolean;
+  platformsChanged: boolean;
+} {
+  let ordersChanged = false;
+
+  const migratedOrders = data.orders.map((order) => {
+    // Skip orders that already have a planId
+    if (order.planId) return order;
+
+    // Try to match using per-order overrides first
+    const installments = order.customInstallments;
+    const interval = order.intervalDays;
+
+    if (installments && interval) {
+      const plan = findMatchingPlan(order.platformId, installments, interval);
+      if (plan) {
+        ordersChanged = true;
+        return { ...order, planId: plan.id };
+      }
+    }
+
+    // Fall back to platform defaults
+    const platform = data.platforms.find((p) => p.id === order.platformId);
+    if (platform) {
+      const plan = findMatchingPlan(
+        order.platformId,
+        platform.defaultInstallments,
+        platform.defaultIntervalDays
+      );
+      if (plan) {
+        ordersChanged = true;
+        return { ...order, planId: plan.id };
+      }
+    }
+
+    return order;
+  });
+
+  return {
+    orders: migratedOrders,
+    platforms: data.platforms,
+    ordersChanged,
+    platformsChanged: false,
   };
 }
