@@ -1,142 +1,44 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { parseISO, isToday, isTomorrow, format } from 'date-fns';
-import {
-  PieChart,
-  Pie,
-  Cell,
-  ResponsiveContainer,
-  Tooltip,
-} from 'recharts';
 import { useBNPLStore } from '../store';
 import {
   useTotalAvailableCredit,
-  useOnTimeStreak,
   useUpcomingPayments,
-
+  useAllPlatformUtilizations,
+  useOverallCreditUtilization,
   useWeeklyDeployment,
   useAllPlatformGoals,
   useTotalLimitGrowth,
   useArbitrageStats,
   useArbitrageOrders,
   useOrdersByType,
+  useTotalOwed,
 } from '../store/selectors';
 import { formatCurrency } from '../utils/currency';
-import { formatDate } from '../utils/date';
-import { Card } from '../components/shared/Card';
-import { Button } from '../components/shared/Button';
-import { Input } from '../components/shared/Input';
 import { PlatformIcon } from '../components/shared/PlatformIcon';
-import { SummaryCards } from '../components/dashboard/SummaryCards';
 import { OverdueAlerts } from '../components/dashboard/OverdueAlerts';
-import { InsightStrip } from '../components/dashboard/InsightStrip';
-import { OrdersSection } from '../components/dashboard/OrdersSection';
-import { DEFAULT_PLATFORMS, PLATFORM_COLORS } from '../constants/platforms';
-import type { Order, PlatformId } from '../types';
+import { PLATFORM_COLORS, DEFAULT_PLATFORMS } from '../constants/platforms';
+import type { PlatformId } from '../types';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function formatDueDate(dateStr: string): string {
   const date = parseISO(dateStr);
-  if (isToday(date)) return 'Today';
-  if (isTomorrow(date)) return 'Tomorrow';
-  return format(date, 'EEE, MMM d');
+  if (isToday(date)) return 'TODAY';
+  if (isTomorrow(date)) return 'TOMORROW';
+  return format(date, 'EEE, MMM d').toUpperCase();
 }
 
-function getUtilizationColor(percent: number): string {
-  if (percent >= 80) return 'text-red-400';
-  if (percent >= 60) return 'text-amber-400';
-  return 'text-green-400';
+function getUtilColor(pct: number): string {
+  if (pct >= 80) return 'text-terminal-red';
+  if (pct >= 60) return 'text-terminal-amber';
+  return 'text-terminal-green';
 }
 
-function getBarColor(percent: number): string {
-  if (percent >= 80) return 'bg-red-500';
-  if (percent >= 60) return 'bg-amber-500';
-  return 'bg-green-500';
-}
-
-const ORDER_TYPE_COLORS: Record<string, string> = {
-  personal: '#3b82f6',
-  necessity: '#22c55e',
-  arbitrage: '#f59e0b',
-};
-
-// ─── History sub-components ──────────────────────────────────────────────────
-
-function OrderCard({ order }: { order: Order }) {
-  const platforms = useBNPLStore((state) => state.platforms);
-  const deleteOrder = useBNPLStore((state) => state.deleteOrder);
-  const openOrderDetailModal = useBNPLStore((state) => state.openOrderDetailModal);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-
-  const platform = platforms.find((p) => p.id === order.platformId);
-  const isCompleted = order.status === 'completed';
-
-  const handleDelete = async () => {
-    await deleteOrder(order.id);
-    setShowDeleteConfirm(false);
-  };
-
-  return (
-    <Card className={isCompleted ? 'opacity-80' : ''}>
-      <div className="flex items-center gap-4">
-        <div
-          className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
-          style={{ backgroundColor: `${platform?.color}20` }}
-        >
-          <PlatformIcon
-            platformId={order.platformId}
-            size="sm"
-            style={{ color: platform?.color }}
-          />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="font-medium text-white truncate">
-              {order.storeName || platform?.name || 'Unknown'}
-            </span>
-            {isCompleted && (
-              <span className="flex items-center gap-1 text-xs text-green-400 bg-green-500/10 px-2 py-0.5 rounded-full">
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-                Paid
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2 text-sm text-gray-400">
-            <span className="font-medium text-gray-300">{formatCurrency(order.totalAmount)}</span>
-            <span>·</span>
-            <span>{platform?.name}</span>
-            <span>·</span>
-            <span>{formatDate(order.createdAt)}</span>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {!showDeleteConfirm ? (
-            <>
-              <Button variant="secondary" size="sm" onClick={() => openOrderDetailModal(order.id)}>
-                View
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowDeleteConfirm(true)}
-                className="text-gray-400 hover:text-red-400"
-              >
-                Delete
-              </Button>
-            </>
-          ) : (
-            <>
-              <span className="text-sm text-gray-400">Delete?</span>
-              <Button variant="danger" size="sm" onClick={handleDelete}>Yes</Button>
-              <Button variant="secondary" size="sm" onClick={() => setShowDeleteConfirm(false)}>No</Button>
-            </>
-          )}
-        </div>
-      </div>
-    </Card>
-  );
+function getBarBg(pct: number): string {
+  if (pct >= 80) return 'bg-terminal-red';
+  if (pct >= 60) return 'bg-terminal-amber';
+  return 'bg-terminal-green';
 }
 
 // ─── Main Page ───────────────────────────────────────────────────────────────
@@ -145,17 +47,38 @@ export function HomePage() {
   const platforms = useBNPLStore((state) => state.platforms);
   const orders = useBNPLStore((state) => state.orders);
   const limitHistory = useBNPLStore((state) => state.limitHistory);
-  const openQuickAddModal = useBNPLStore((state) => state.openQuickAddModal);
+  const openOrderDetailModal = useBNPLStore((state) => state.openOrderDetailModal);
 
-  // Credit overview
   const totalAvailable = useTotalAvailableCredit();
-  const onTimeStreak = useOnTimeStreak();
+  const totalOwed = useTotalOwed();
   const upcomingPayments = useUpcomingPayments(7);
+  const creditUtilization = useOverallCreditUtilization();
+  const utilizations = useAllPlatformUtilizations();
+  const weeklyDeployment = useWeeklyDeployment();
+  const platformGoals = useAllPlatformGoals();
+  const limitGrowth = useTotalLimitGrowth();
+  const arbitrageStats = useArbitrageStats();
+  const arbitrageOrders = useArbitrageOrders();
+  const ordersByType = useOrdersByType();
+
   const totalLimit = platforms.reduce((sum, p) => sum + p.creditLimit, 0);
-  const usedCredit = totalLimit - totalAvailable;
-  const utilizationPercent = totalLimit > 0 ? (usedCredit / totalLimit) * 100 : 0;
-  const activeOrders = orders.filter((o) => o.status === 'active').length;
+  const activeOrders = orders.filter((o) => o.status === 'active');
   const dueThisWeek = upcomingPayments.reduce((sum, p) => sum + p.amount, 0);
+
+  const [activePlatformTab, setActivePlatformTab] = useState<PlatformId | 'all'>('all');
+
+  const platformCredits = utilizations
+    .filter((u) => u.limit > 0)
+    .map((u) => {
+      const platform = platforms.find((p) => p.id === u.platformId);
+      return platform ? { ...u, platform } : null;
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+
+  const filteredOrders = useMemo(() => {
+    const base = activePlatformTab === 'all' ? activeOrders : activeOrders.filter((o) => o.platformId === activePlatformTab);
+    return base.sort((a, b) => parseISO(b.createdAt).getTime() - parseISO(a.createdAt).getTime());
+  }, [activeOrders, activePlatformTab]);
 
   const getPaymentStoreName = (payment: (typeof upcomingPayments)[0]) => {
     const order = orders.find((o) => o.id === payment.orderId);
@@ -164,506 +87,338 @@ export function HomePage() {
     return platform?.name || 'Unknown';
   };
 
-  // Analytics
-
-  const weeklyDeployment = useWeeklyDeployment();
-  const platformGoals = useAllPlatformGoals();
-  const limitGrowth = useTotalLimitGrowth();
-  const arbitrageStats = useArbitrageStats();
-  const arbitrageOrders = useArbitrageOrders();
-  const hasArbitrageOrders = arbitrageOrders.length > 0;
-  const ordersByType = useOrdersByType();
-
-
-  const orderTypePieData = useMemo(() => {
-    const data = [];
-    if (ordersByType.personal.count > 0)
-      data.push({ name: 'Personal', value: ordersByType.personal.total, color: ORDER_TYPE_COLORS.personal });
-    if (ordersByType.necessity.count > 0)
-      data.push({ name: 'Necessity', value: ordersByType.necessity.total, color: ORDER_TYPE_COLORS.necessity });
-    if (ordersByType.arbitrage.count > 0)
-      data.push({ name: 'Arbitrage', value: ordersByType.arbitrage.total, color: ORDER_TYPE_COLORS.arbitrage });
-    return data;
-  }, [ordersByType]);
-
-  const recentLimitChanges = useMemo(() => {
-    return [...limitHistory]
-      .sort((a, b) => new Date(b.changedAt).getTime() - new Date(a.changedAt).getTime())
-      .slice(0, 5)
-      .map((change) => ({ ...change, platform: platforms.find((p) => p.id === change.platformId) }));
-  }, [limitHistory, platforms]);
-
-  // History
-  const [searchQuery, setSearchQuery] = useState('');
-  const [platformFilter, setPlatformFilter] = useState<PlatformId | 'all'>('all');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'completed'>('completed');
-  const [sortBy, setSortBy] = useState<'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc'>('date-desc');
-
-  const filteredOrders = useMemo(() => {
-    return orders
-      .filter((order) => {
-        if (platformFilter !== 'all' && order.platformId !== platformFilter) return false;
-        if (statusFilter !== 'all' && order.status !== statusFilter) return false;
-        if (searchQuery.trim()) {
-          const query = searchQuery.toLowerCase();
-          const platform = platforms.find((p) => p.id === order.platformId);
-          if (!order.storeName?.toLowerCase().includes(query) && !platform?.name.toLowerCase().includes(query))
-            return false;
-        }
-        return true;
-      })
-      .sort((a, b) => {
-        switch (sortBy) {
-          case 'date-asc': return parseISO(a.createdAt).getTime() - parseISO(b.createdAt).getTime();
-          case 'amount-desc': return b.totalAmount - a.totalAmount;
-          case 'amount-asc': return a.totalAmount - b.totalAmount;
-          default: return parseISO(b.createdAt).getTime() - parseISO(a.createdAt).getTime();
-        }
-      });
-  }, [orders, platformFilter, statusFilter, searchQuery, platforms, sortBy]);
-
-  const statusCounts = useMemo(() => ({
-    all: orders.length,
-    active: orders.filter((o) => o.status === 'active').length,
-    completed: orders.filter((o) => o.status === 'completed').length,
-  }), [orders]);
+  const allGoals = [...platformGoals.flexible, ...platformGoals.limited];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-0">
 
-      {/* ── Credit Overview Hero ─────────────────────────────────────── */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-dark-card to-dark-bg border border-dark-border p-6">
-        <div className="absolute -top-20 -right-20 w-40 h-40 bg-green-500/10 rounded-full blur-3xl" />
-        <div className="absolute -bottom-20 -left-20 w-40 h-40 bg-purple-500/10 rounded-full blur-3xl" />
-        {onTimeStreak > 0 && (
-          <div className="absolute top-4 right-4 flex items-center gap-1 bg-amber-500/20 text-amber-400 px-2 py-1 rounded-full text-sm font-medium">
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-            </svg>
-            <span>{onTimeStreak}</span>
+      {/* ═══ ZONE 1: METRICS STRIP ═══ */}
+      <div className="border border-dark-border bg-dark-card p-2 mb-0">
+        <div className="flex items-center flex-wrap gap-y-1 divide-x divide-dark-border">
+          <div className="px-3 first:pl-0">
+            <span className="terminal-label">AVAILABLE</span>
+            <span className="ml-2 text-terminal-green font-semibold">{formatCurrency(totalAvailable)}</span>
           </div>
-        )}
-        <div className="relative grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          <div>
-            <p className="text-gray-400 text-sm">Available Credit</p>
-            <p className="text-2xl font-bold text-green-400">{formatCurrency(totalAvailable)}</p>
+          <div className="px-3">
+            <span className="terminal-label">USED</span>
+            <span className={`ml-2 font-semibold ${getUtilColor(creditUtilization.percentage)}`}>{formatCurrency(totalOwed)}</span>
           </div>
-          <div>
-            <p className="text-gray-400 text-sm">Used Credit</p>
-            <p className={`text-2xl font-bold ${getUtilizationColor(utilizationPercent)}`}>{formatCurrency(usedCredit)}</p>
+          <div className="px-3">
+            <span className="terminal-label">DUE 7D</span>
+            <span className="ml-2 text-white font-semibold">{formatCurrency(dueThisWeek)}</span>
           </div>
-          <div>
-            <p className="text-gray-400 text-sm">Due This Week</p>
-            <p className="text-2xl font-bold text-white">{formatCurrency(dueThisWeek)}</p>
+          <div className="px-3">
+            <span className="terminal-label">ACTIVE</span>
+            <span className="ml-2 text-white font-semibold">{activeOrders.length}</span>
           </div>
-          <div>
-            <p className="text-gray-400 text-sm">Active Orders</p>
-            <p className="text-2xl font-bold text-white">{activeOrders}</p>
-          </div>
-        </div>
-        <div className="relative">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-gray-400">Credit Utilization</span>
-            <span className={`text-sm font-medium ${getUtilizationColor(utilizationPercent)}`}>
-              {utilizationPercent.toFixed(0)}%
+          <div className="px-3">
+            <span className="terminal-label">UTIL</span>
+            <span className={`ml-2 font-bold ${getUtilColor(creditUtilization.percentage)}`}>
+              {creditUtilization.percentage.toFixed(0)}%
             </span>
           </div>
-          <div className="h-2 rounded-full bg-dark-hover overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all duration-500 ${getBarColor(utilizationPercent)}`}
-              style={{ width: `${Math.min(utilizationPercent, 100)}%` }}
-            />
+          <div className="px-3">
+            <span className="terminal-label">LIMIT</span>
+            <span className="ml-2 text-terminal-muted font-semibold">{formatCurrency(totalLimit)}</span>
           </div>
         </div>
       </div>
 
-      {/* ── Dashboard Sections ───────────────────────────────────────── */}
+      {/* Overdue Alerts */}
       <OverdueAlerts />
-      <SummaryCards />
-      <InsightStrip />
 
-      {/* ── Next Up ──────────────────────────────────────────────────── */}
-      {upcomingPayments.length > 0 && (
-        <div>
-          <h2 className="text-lg font-semibold text-white mb-4">Next Up</h2>
-          <div className="space-y-2">
-            {upcomingPayments.slice(0, 3).map((payment) => {
-              const platformColor = PLATFORM_COLORS[payment.platformId] || '#6b7280';
-              return (
-                <Card key={payment.id} padding="sm" className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: platformColor }} />
-                    <div>
-                      <p className="font-medium text-white">{getPaymentStoreName(payment)}</p>
-                      <p className="text-xs text-gray-400">{formatDueDate(payment.dueDate)}</p>
+      {/* ═══ ZONE 2: MAIN DASHBOARD (Grid) ═══ */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] border-x border-dark-border">
+
+        {/* ── LEFT: Platform View ── */}
+        <div className="border-b lg:border-b-0 lg:border-r border-dark-border">
+          {/* Platform Tabs */}
+          <div className="flex items-center border-b border-dark-border px-2 py-1 gap-0 overflow-x-auto">
+            <button
+              onClick={() => setActivePlatformTab('all')}
+              className={`px-3 py-1 text-2xs uppercase tracking-wider transition-colors whitespace-nowrap ${
+                activePlatformTab === 'all'
+                  ? 'text-terminal-amber border-b-2 border-terminal-amber'
+                  : 'text-terminal-muted hover:text-terminal-text'
+              }`}
+            >
+              ALL
+            </button>
+            {platforms.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => setActivePlatformTab(p.id as PlatformId)}
+                className={`px-3 py-1 text-2xs uppercase tracking-wider transition-colors whitespace-nowrap ${
+                  activePlatformTab === p.id
+                    ? 'border-b-2 text-white'
+                    : 'text-terminal-muted hover:text-terminal-text'
+                }`}
+                style={activePlatformTab === p.id ? { borderColor: p.color, color: p.color } : undefined}
+              >
+                {p.name}
+              </button>
+            ))}
+          </div>
+
+          {/* Platform Credit Bars */}
+          {activePlatformTab === 'all' && platformCredits.length > 0 && (
+            <div className="border-b border-dark-border p-2">
+              <div className="terminal-label mb-2">CREDIT BY PLATFORM</div>
+              <div className="space-y-1.5">
+                {platformCredits.map(({ platform, used, available, limit, percentage }) => (
+                  <div key={platform.id} className="flex items-center gap-2 text-2xs">
+                    <span className="w-16 text-terminal-muted truncate">{platform.name.toUpperCase()}</span>
+                    <div className="flex-1 h-1.5 bg-dark-hover overflow-hidden">
+                      <div className={`h-full ${getBarBg(percentage)}`} style={{ width: `${Math.min(percentage, 100)}%` }} />
                     </div>
+                    <span className="w-14 text-right text-terminal-green">{formatCurrency(available)}</span>
+                    <span className="w-12 text-right text-terminal-muted">{formatCurrency(limit)}</span>
+                    <span className={`w-8 text-right font-semibold ${getUtilColor(percentage)}`}>{Math.round(percentage)}%</span>
                   </div>
-                  <p className="font-medium text-white">{formatCurrency(payment.amount)}</p>
-                </Card>
-              );
-            })}
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Active Orders Table */}
+          <div className="p-2">
+            <div className="terminal-label mb-2">ACTIVE ORDERS ({filteredOrders.length})</div>
+            {filteredOrders.length > 0 ? (
+              <table className="w-full text-2xs">
+                <thead>
+                  <tr className="text-terminal-muted border-b border-dark-border">
+                    <th className="text-left py-1 font-medium">STORE</th>
+                    <th className="text-left py-1 font-medium">PLATFORM</th>
+                    <th className="text-right py-1 font-medium">AMOUNT</th>
+                    <th className="text-right py-1 font-medium">STATUS</th>
+                    <th className="text-right py-1 font-medium">CREATED</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredOrders.map((order) => {
+                    const platform = platforms.find((p) => p.id === order.platformId);
+                    return (
+                      <tr
+                        key={order.id}
+                        className="border-b border-dark-border/50 hover:bg-dark-hover cursor-pointer transition-colors"
+                        onClick={() => openOrderDetailModal(order.id)}
+                      >
+                        <td className="py-1.5 text-white">{order.storeName || '—'}</td>
+                        <td className="py-1.5" style={{ color: platform?.color }}>{platform?.name}</td>
+                        <td className="py-1.5 text-right text-terminal-amber font-semibold">{formatCurrency(order.totalAmount)}</td>
+                        <td className="py-1.5 text-right">
+                          <span className="text-terminal-green">ACTIVE</span>
+                        </td>
+                        <td className="py-1.5 text-right text-terminal-muted">{format(parseISO(order.createdAt), 'MM/dd')}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            ) : (
+              <div className="text-terminal-muted text-2xs py-4 text-center">NO ACTIVE ORDERS</div>
+            )}
           </div>
         </div>
-      )}
 
-      {/* ── Orders ───────────────────────────────────────────────────── */}
-      <OrdersSection />
-
-      {/* ── Add Order Button ─────────────────────────────────────────── */}
-      <div>
-        <button
-          onClick={openQuickAddModal}
-          className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          Add Order
-        </button>
-      </div>
-
-      {/* ── Capital Strategy (Analytics) ─────────────────────────────── */}
-      <div>
-        <h2 className="text-2xl font-bold text-white mb-1">Capital Strategy</h2>
-        <p className="text-gray-400 mb-6">Track your credit-building progress and deployment</p>
-
-        {/* Available Capital */}
-        <Card className="mb-6">
-          <h3 className="text-lg font-semibold text-white mb-4">Available Capital</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <p className="text-3xl font-bold text-white">{formatCurrency(totalAvailable)}</p>
-              <p className="text-sm text-gray-400 mt-1">Total Available Credit</p>
-            </div>
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-sm text-gray-400">Weekly Deployment</p>
-                <p className="text-white font-medium">{formatCurrency(weeklyDeployment.amount)}</p>
-              </div>
-              <div className="h-3 bg-dark-card rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all ${
-                    weeklyDeployment.isOverExtended ? 'bg-red-500' : weeklyDeployment.warningThreshold ? 'bg-amber-500' : 'bg-green-500'
-                  }`}
-                  style={{ width: `${Math.min((weeklyDeployment.amount / 60000) * 100, 100)}%` }}
-                />
-              </div>
-              <div className="flex justify-between mt-1">
-                <p className="text-xs text-gray-500">$0</p>
-                <p className="text-xs text-gray-500">$600</p>
-              </div>
-              {weeklyDeployment.isOverExtended && (
-                <p className="text-sm text-red-400 mt-2">Warning: Over $600 deployed this week</p>
-              )}
-              {!weeklyDeployment.isOverExtended && weeklyDeployment.warningThreshold && (
-                <p className="text-sm text-amber-400 mt-2">Approaching weekly limit threshold</p>
-              )}
-            </div>
-          </div>
-        </Card>
-
-        {/* Platform Goals */}
-        <Card className="mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-white">Platform Goals</h3>
-          </div>
-          {platformGoals.flexible.length > 0 && (
-            <div className="mb-6">
-              <p className="text-sm font-medium text-blue-400 mb-3">Flexible (Virtual Visa)</p>
-              <div className="space-y-3">
-                {platformGoals.flexible.map(({ platform, currentLimit, goalLimit, progress }) => (
-                  <div key={platform.id}>
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="flex items-center gap-2">
-                        <span className="w-3 h-3 rounded-full" style={{ backgroundColor: platform.color }} />
-                        <span className="text-white text-sm">{platform.name}</span>
-                      </div>
-                      <span className="text-gray-400 text-sm">{formatCurrency(currentLimit)} / {formatCurrency(goalLimit)}</span>
-                    </div>
-                    <div className="h-2 bg-dark-card rounded-full overflow-hidden">
-                      <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(progress, 100)}%`, backgroundColor: platform.color }} />
-                    </div>
-                    {progress >= 100 && <p className="text-xs text-green-400 mt-1">Goal reached!</p>}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          {platformGoals.limited.length > 0 && (
-            <div>
-              <p className="text-sm font-medium text-amber-400 mb-3">Limited (Merchant-specific)</p>
-              <div className="space-y-3">
-                {platformGoals.limited.map(({ platform, currentLimit, goalLimit, progress }) => (
-                  <div key={platform.id}>
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="flex items-center gap-2">
-                        <span className="w-3 h-3 rounded-full" style={{ backgroundColor: platform.color }} />
-                        <span className="text-white text-sm">{platform.name}</span>
-                      </div>
-                      <span className="text-gray-400 text-sm">{formatCurrency(currentLimit)} / {formatCurrency(goalLimit)}</span>
-                    </div>
-                    <div className="h-2 bg-dark-card rounded-full overflow-hidden">
-                      <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(progress, 100)}%`, backgroundColor: platform.color }} />
-                    </div>
-                    {progress >= 100 && <p className="text-xs text-green-400 mt-1">Goal reached!</p>}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          {platformGoals.flexible.length === 0 && platformGoals.limited.length === 0 && (
-            <p className="text-gray-500 text-sm">No goals set. Set platform goals in Settings to track your progress.</p>
-          )}
-        </Card>
-
-        {/* Limit Growth */}
-        <Card className="mb-6">
-          <h3 className="text-lg font-semibold text-white mb-4">Limit Growth</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 p-4 bg-dark-hover rounded-lg">
-            <div>
-              <p className="text-sm text-gray-400">Starting Total</p>
-              <p className="text-xl font-semibold text-white">{formatCurrency(limitGrowth.startingTotal)}</p>
-            </div>
-            <div>
-              <p className="text-sm text-gray-400">Current Total</p>
-              <p className="text-xl font-semibold text-white">{formatCurrency(limitGrowth.currentTotal)}</p>
-            </div>
-            <div>
-              <p className="text-sm text-gray-400">Total Growth</p>
-              <p className={`text-xl font-semibold ${limitGrowth.growthAmount >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                {limitGrowth.growthAmount >= 0 ? '+' : ''}{formatCurrency(limitGrowth.growthAmount)}
-                {limitGrowth.growthPercent > 0 && <span className="text-sm ml-1">({limitGrowth.growthPercent.toFixed(0)}%)</span>}
-              </p>
-            </div>
-          </div>
-          {recentLimitChanges.length > 0 ? (
-            <div>
-              <p className="text-sm text-gray-400 mb-3">Recent Limit Increases</p>
-              <div className="space-y-2">
-                {recentLimitChanges.map((change) => {
-                  const increase = change.newLimit - change.previousLimit;
+        {/* ── RIGHT: Upcoming & Analytics ── */}
+        <div>
+          {/* Upcoming Payments */}
+          <div className="border-b border-dark-border p-2">
+            <div className="terminal-label mb-2">UPCOMING PAYMENTS</div>
+            {upcomingPayments.length > 0 ? (
+              <div className="space-y-0">
+                {upcomingPayments.slice(0, 8).map((payment) => {
+                  const platformColor = PLATFORM_COLORS[payment.platformId] || '#6b7280';
                   return (
-                    <div key={change.id} className="flex items-center justify-between py-2 border-b border-dark-border last:border-0">
-                      <div className="flex items-center gap-3">
-                        {change.platform && <span className="w-3 h-3 rounded-full" style={{ backgroundColor: change.platform.color }} />}
-                        <div>
-                          <p className="text-white text-sm">{change.platform?.name || change.platformId}</p>
-                          <p className="text-xs text-gray-500">
-                            {format(parseISO(change.changedAt), 'MMM d, yyyy')} · {change.onTimeStreakAtChange} on-time streak
-                          </p>
-                        </div>
+                    <div key={payment.id} className="flex items-center justify-between py-1.5 border-b border-dark-border/50 last:border-0 text-2xs">
+                      <div className="flex items-center gap-2">
+                        <span className="w-1.5 h-1.5" style={{ backgroundColor: platformColor }} />
+                        <span className="text-white">{getPaymentStoreName(payment)}</span>
                       </div>
-                      <p className={`text-sm font-medium ${increase >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {increase >= 0 ? '+' : ''}{formatCurrency(increase)}
-                      </p>
+                      <div className="flex items-center gap-3">
+                        <span className="text-terminal-muted">{formatDueDate(payment.dueDate)}</span>
+                        <span className="text-terminal-amber font-semibold w-16 text-right">{formatCurrency(payment.amount)}</span>
+                      </div>
                     </div>
                   );
                 })}
               </div>
-            </div>
-          ) : (
-            <p className="text-gray-500 text-sm">No limit changes recorded yet.</p>
-          )}
-        </Card>
-
-        {/* Arbitrage Performance */}
-        {hasArbitrageOrders && (
-          <Card className="bg-gradient-to-br from-amber-500/10 to-transparent mb-6">
-            <h3 className="text-lg font-semibold text-white mb-4">Arbitrage Performance</h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-              <div>
-                <p className="text-sm text-gray-400">Total Deployed</p>
-                <p className="text-xl font-semibold text-white">{formatCurrency(arbitrageStats.totalPurchased)}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-400">Total Sales</p>
-                <p className="text-xl font-semibold text-white">{formatCurrency(arbitrageStats.totalSaleAmount)}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-400">Net Cash</p>
-                <p className={`text-xl font-semibold ${arbitrageStats.totalNetCash >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  {arbitrageStats.totalNetCash >= 0 ? '+' : ''}{formatCurrency(Math.abs(arbitrageStats.totalNetCash))}
-                </p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-400">Avg Cost of Capital</p>
-                <p className="text-xl font-semibold text-white">
-                  {arbitrageStats.averageCostOfCapital > 0 ? `${arbitrageStats.averageCostOfCapital.toFixed(1)}%` : '0%'}
-                </p>
-              </div>
-            </div>
-            {arbitrageStats.pendingSales > 0 && (
-              <p className="text-sm text-amber-400 mb-4">
-                {arbitrageStats.pendingSales} order{arbitrageStats.pendingSales > 1 ? 's' : ''} pending sale
-              </p>
+            ) : (
+              <div className="text-terminal-muted text-2xs py-4 text-center">NO UPCOMING PAYMENTS</div>
             )}
-            {arbitrageOrders.length > 0 && (
+          </div>
+
+          {/* Weekly Deployment */}
+          <div className="border-b border-dark-border p-2">
+            <div className="terminal-label mb-1">WEEKLY DEPLOYMENT</div>
+            <div className="flex items-center justify-between text-2xs mb-1">
+              <span className="text-white font-semibold">{formatCurrency(weeklyDeployment.amount)}</span>
+              <span className="text-terminal-muted">/ $600</span>
+            </div>
+            <div className="h-1.5 bg-dark-hover overflow-hidden">
+              <div
+                className={`h-full ${weeklyDeployment.isOverExtended ? 'bg-terminal-red' : weeklyDeployment.warningThreshold ? 'bg-terminal-amber' : 'bg-terminal-green'}`}
+                style={{ width: `${Math.min((weeklyDeployment.amount / 60000) * 100, 100)}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Platform Goals */}
+          {allGoals.length > 0 && (
+            <div className="border-b border-dark-border p-2">
+              <div className="terminal-label mb-2">PLATFORM GOALS</div>
+              <div className="space-y-1.5">
+                {allGoals.map(({ platform, currentLimit, goalLimit, progress }) => (
+                  <div key={platform.id} className="text-2xs">
+                    <div className="flex items-center justify-between mb-0.5">
+                      <span style={{ color: platform.color }}>{platform.name.toUpperCase()}</span>
+                      <span className="text-terminal-muted">{formatCurrency(currentLimit)}/{formatCurrency(goalLimit)}</span>
+                    </div>
+                    <div className="h-1 bg-dark-hover overflow-hidden">
+                      <div className="h-full" style={{ width: `${Math.min(progress, 100)}%`, backgroundColor: platform.color }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Limit Growth Summary */}
+          <div className="p-2">
+            <div className="terminal-label mb-2">LIMIT GROWTH</div>
+            <div className="grid grid-cols-3 gap-2 text-2xs">
               <div>
-                <p className="text-sm text-gray-400 mb-3">Recent Orders</p>
-                <div className="space-y-2">
-                  {arbitrageOrders.slice(0, 5).map((order) => {
-                    const platform = platforms.find((p) => p.id === order.platformId);
+                <span className="text-terminal-muted block">START</span>
+                <span className="text-white font-semibold">{formatCurrency(limitGrowth.startingTotal)}</span>
+              </div>
+              <div>
+                <span className="text-terminal-muted block">CURRENT</span>
+                <span className="text-white font-semibold">{formatCurrency(limitGrowth.currentTotal)}</span>
+              </div>
+              <div>
+                <span className="text-terminal-muted block">GROWTH</span>
+                <span className={`font-semibold ${limitGrowth.growthAmount >= 0 ? 'text-terminal-green' : 'text-terminal-red'}`}>
+                  {limitGrowth.growthAmount >= 0 ? '+' : ''}{formatCurrency(limitGrowth.growthAmount)}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ═══ ZONE 3: ANALYTICS STRIP ═══ */}
+      <div className="border border-dark-border bg-dark-card">
+        <div className="grid grid-cols-1 md:grid-cols-4 divide-y md:divide-y-0 md:divide-x divide-dark-border">
+
+          {/* Order Breakdown */}
+          <div className="p-2">
+            <div className="terminal-label mb-2">ORDER BREAKDOWN</div>
+            <div className="space-y-1 text-2xs">
+              {[
+                { key: 'personal', label: 'PERSONAL', color: '#3b82f6' },
+                { key: 'necessity', label: 'NECESSITY', color: '#22c55e' },
+                { key: 'arbitrage', label: 'ARBITRAGE', color: '#f59e0b' },
+              ].map(({ key, label, color }) => {
+                const data = ordersByType[key as keyof typeof ordersByType];
+                return (
+                  <div key={key} className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2" style={{ backgroundColor: color }} />
+                      <span className="text-terminal-muted">{label}</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-terminal-muted">{data.count}x</span>
+                      <span className="text-white font-semibold w-16 text-right">{formatCurrency(data.total)}</span>
+                    </div>
+                  </div>
+                );
+              })}
+              <div className="border-t border-dark-border pt-1 flex items-center justify-between">
+                <span className="text-terminal-amber font-semibold">TOTAL</span>
+                <span className="text-terminal-amber font-bold">
+                  {formatCurrency(ordersByType.personal.total + ordersByType.necessity.total + ordersByType.arbitrage.total)}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Arbitrage Stats */}
+          <div className="p-2">
+            <div className="terminal-label mb-2">ARBITRAGE</div>
+            {arbitrageOrders.length > 0 ? (
+              <div className="space-y-1 text-2xs">
+                <div className="flex justify-between">
+                  <span className="text-terminal-muted">DEPLOYED</span>
+                  <span className="text-white font-semibold">{formatCurrency(arbitrageStats.totalPurchased)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-terminal-muted">SALES</span>
+                  <span className="text-white font-semibold">{formatCurrency(arbitrageStats.totalSaleAmount)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-terminal-muted">NET</span>
+                  <span className={`font-semibold ${arbitrageStats.totalNetCash >= 0 ? 'text-terminal-green' : 'text-terminal-red'}`}>
+                    {arbitrageStats.totalNetCash >= 0 ? '+' : ''}{formatCurrency(Math.abs(arbitrageStats.totalNetCash))}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-terminal-muted">COST OF CAP</span>
+                  <span className="text-white font-semibold">{arbitrageStats.averageCostOfCapital.toFixed(1)}%</span>
+                </div>
+              </div>
+            ) : (
+              <div className="text-terminal-muted text-2xs">NO ARBITRAGE DATA</div>
+            )}
+          </div>
+
+          {/* Available Capital */}
+          <div className="p-2">
+            <div className="terminal-label mb-2">CAPITAL</div>
+            <div className="space-y-1 text-2xs">
+              <div className="flex justify-between">
+                <span className="text-terminal-muted">AVAILABLE</span>
+                <span className="text-terminal-green font-bold text-sm">{formatCurrency(totalAvailable)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-terminal-muted">WEEKLY</span>
+                <span className={`font-semibold ${weeklyDeployment.isOverExtended ? 'text-terminal-red' : 'text-white'}`}>
+                  {formatCurrency(weeklyDeployment.amount)}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-terminal-muted">TOTAL LIMIT</span>
+                <span className="text-white font-semibold">{formatCurrency(totalLimit)}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Recent Limit Changes */}
+          <div className="p-2">
+            <div className="terminal-label mb-2">RECENT CHANGES</div>
+            {limitHistory.length > 0 ? (
+              <div className="space-y-1 text-2xs">
+                {[...limitHistory]
+                  .sort((a, b) => new Date(b.changedAt).getTime() - new Date(a.changedAt).getTime())
+                  .slice(0, 4)
+                  .map((change) => {
+                    const platform = platforms.find((p) => p.id === change.platformId);
+                    const increase = change.newLimit - change.previousLimit;
                     return (
-                      <div key={order.id} className="flex items-center justify-between py-2 border-b border-amber-500/20 last:border-0">
-                        <div className="flex items-center gap-3">
-                          {platform && <span className="w-3 h-3 rounded-full" style={{ backgroundColor: platform.color }} />}
-                          <div>
-                            <p className="text-white text-sm">{order.storeName || platform?.name || order.platformId}</p>
-                            <p className="text-xs text-gray-500">{formatCurrency(order.totalAmount)} purchase</p>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          {order.saleAmount ? (
-                            <>
-                              <p className={`text-sm font-medium ${order.isProfitable ? 'text-green-400' : 'text-red-400'}`}>
-                                {order.netCash >= 0 ? '+' : ''}{formatCurrency(order.netCash)}
-                              </p>
-                              {!order.isProfitable && <p className="text-xs text-gray-500">{order.costOfCapitalPercent.toFixed(1)}% cost</p>}
-                            </>
-                          ) : (
-                            <p className="text-sm text-gray-500">Pending sale</p>
-                          )}
-                        </div>
+                      <div key={change.id} className="flex items-center justify-between">
+                        <span className="text-terminal-muted">{platform?.name?.toUpperCase() || change.platformId}</span>
+                        <span className={`font-semibold ${increase >= 0 ? 'text-terminal-green' : 'text-terminal-red'}`}>
+                          {increase >= 0 ? '+' : ''}{formatCurrency(increase)}
+                        </span>
                       </div>
                     );
                   })}
-                </div>
-              </div>
-            )}
-          </Card>
-        )}
-
-        {/* Order Breakdown */}
-        <Card>
-          <h3 className="text-lg font-semibold text-white mb-4">Order Breakdown</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {orderTypePieData.length > 0 ? (
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={orderTypePieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={2}>
-                      {orderTypePieData.map((entry, index) => <Cell key={index} fill={entry.color} />)}
-                    </Pie>
-                    <Tooltip
-                      formatter={(value) => formatCurrency(Number(value))}
-                      contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #262626', borderRadius: '8px' }}
-                      labelStyle={{ color: '#fff' }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
               </div>
             ) : (
-              <div className="h-64 flex items-center justify-center text-gray-500">No orders yet</div>
+              <div className="text-terminal-muted text-2xs">NO CHANGES</div>
             )}
-            <div className="flex flex-col justify-center space-y-4">
-              {[
-                { key: 'personal', label: 'Personal' },
-                { key: 'necessity', label: 'Necessity' },
-                { key: 'arbitrage', label: 'Arbitrage' },
-              ].map(({ key, label }) => (
-                <div key={key} className="flex items-center gap-3">
-                  <span className="w-4 h-4 rounded-full" style={{ backgroundColor: ORDER_TYPE_COLORS[key] }} />
-                  <div className="flex-1">
-                    <p className="text-white">{label}</p>
-                    <p className="text-sm text-gray-400">
-                      {ordersByType[key as keyof typeof ordersByType].count} orders · {formatCurrency(ordersByType[key as keyof typeof ordersByType].total)}
-                    </p>
-                  </div>
-                </div>
-              ))}
-              <div className="pt-4 border-t border-dark-border">
-                <p className="text-sm text-gray-400">Total Deployed (All Time)</p>
-                <p className="text-2xl font-bold text-white">
-                  {formatCurrency(ordersByType.personal.total + ordersByType.necessity.total + ordersByType.arbitrage.total)}
-                </p>
-              </div>
-            </div>
           </div>
-        </Card>
-      </div>
-
-      {/* ── Payment History ───────────────────────────────────────────── */}
-      <div>
-        <h2 className="text-2xl font-bold text-white mb-1">Payment History</h2>
-        <p className="text-gray-400 mb-6">View your completed and past orders</p>
-
-        <Card padding="md" className="mb-4">
-          <div className="space-y-4">
-            <div className="flex flex-col md:flex-row gap-3">
-              <div className="flex-1 relative">
-                <Input
-                  placeholder="Search by store or platform..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
-                {searchQuery && (
-                  <button
-                    onClick={() => setSearchQuery('')}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                )}
-              </div>
-              <select
-                value={platformFilter}
-                onChange={(e) => setPlatformFilter(e.target.value as PlatformId | 'all')}
-                className="px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="all">All Platforms</option>
-                {platforms.map((platform) => (
-                  <option key={platform.id} value={platform.id}>{platform.name}</option>
-                ))}
-              </select>
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-                className="px-3 py-2 bg-dark-card border border-dark-border rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="date-desc">Newest First</option>
-                <option value="date-asc">Oldest First</option>
-                <option value="amount-desc">Highest Amount</option>
-                <option value="amount-asc">Lowest Amount</option>
-              </select>
-            </div>
-            <div className="flex items-center gap-2">
-              {(['completed', 'active', 'all'] as const).map((status) => (
-                <button
-                  key={status}
-                  onClick={() => setStatusFilter(status)}
-                  className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
-                    statusFilter === status
-                      ? 'bg-blue-500/20 text-blue-400 border border-blue-500/50'
-                      : 'bg-dark-hover text-gray-400 border border-dark-border hover:border-gray-600'
-                  }`}
-                >
-                  {status === 'all' ? 'All' : status.charAt(0).toUpperCase() + status.slice(1)}
-                  <span className="ml-1.5 text-xs opacity-60">({statusCounts[status]})</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </Card>
-
-        {filteredOrders.length === 0 ? (
-          <Card>
-            <div className="text-center py-12">
-              <svg className="w-12 h-12 text-gray-600 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-              </svg>
-              <p className="text-gray-400">
-                {orders.length === 0 ? 'No orders yet' : statusFilter === 'completed' ? 'No completed orders yet' : 'No orders match your filters'}
-              </p>
-            </div>
-          </Card>
-        ) : (
-          <div className="space-y-3">
-            <p className="text-sm text-gray-500">{filteredOrders.length} order{filteredOrders.length !== 1 ? 's' : ''}</p>
-            {filteredOrders.map((order) => <OrderCard key={order.id} order={order} />)}
-          </div>
-        )}
+        </div>
       </div>
 
     </div>

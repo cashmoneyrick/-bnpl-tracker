@@ -8,16 +8,16 @@ export const Card = forwardRef<HTMLDivElement, CardProps>(
   ({ className = '', padding = 'md', children, ...props }, ref) => {
     const paddings = {
       none: '',
-      sm: 'p-3',
-      md: 'p-4',
-      lg: 'p-6',
+      sm: 'p-2',
+      md: 'p-3',
+      lg: 'p-4',
     };
 
     return (
       <div
         ref={ref}
         className={`
-          bg-dark-card border border-dark-border rounded-xl
+          bg-dark-card border border-dark-border
           ${paddings[padding]}
           ${className}
         `}

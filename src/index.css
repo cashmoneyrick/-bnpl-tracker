@@ -3,201 +3,127 @@
 @tailwind utilities;
 
 :root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
   line-height: 1.5;
   font-weight: 400;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
 }
 
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  background: #0B0E11;
+  color: #C8CCD0;
 }
 
-/* Scrollbar styling for dark mode */
+* {
+  border-radius: 0 !important;
+}
+
+/* Scrollbar - terminal style */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #141414;
+  background: #0B0E11;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #404040;
-  border-radius: 4px;
+  background: #1E2328;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #525252;
+  background: #2A3038;
 }
 
-/* Date picker calendar icon for dark mode */
 input[type="date"]::-webkit-calendar-picker-indicator {
   filter: invert(1);
   cursor: pointer;
 }
 
-/* Platform colors are defined in src/constants/platforms.ts
-   Use inline styles with platform.color for dynamic coloring */
+.terminal-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #6B7280;
+}
 
 /* Toast animation */
 @keyframes slide-in {
-  from {
-    transform: translateX(100%);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
 }
+.animate-slide-in { animation: slide-in 0.3s ease-out; }
 
-.animate-slide-in {
-  animation: slide-in 0.3s ease-out;
-}
-
-/* Haptic-style feedback animations */
-
-/* Success bounce - for checkmarks and confirmations */
 @keyframes success-bounce {
-  0% {
-    transform: scale(0);
-    opacity: 0;
-  }
-  50% {
-    transform: scale(1.2);
-  }
-  70% {
-    transform: scale(0.9);
-  }
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
+  0% { transform: scale(0); opacity: 0; }
+  50% { transform: scale(1.2); }
+  70% { transform: scale(0.9); }
+  100% { transform: scale(1); opacity: 1; }
 }
+.animate-success-bounce { animation: success-bounce 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
 
-.animate-success-bounce {
-  animation: success-bounce 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-}
-
-/* Pop scale - for button clicks and selections */
 @keyframes pop {
-  0% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(0.95);
-  }
-  100% {
-    transform: scale(1);
-  }
+  0% { transform: scale(1); }
+  50% { transform: scale(0.95); }
+  100% { transform: scale(1); }
 }
+.animate-pop { animation: pop 0.15s ease-out; }
 
-.animate-pop {
-  animation: pop 0.15s ease-out;
-}
-
-/* Checkmark draw animation */
 @keyframes checkmark-draw {
-  0% {
-    stroke-dashoffset: 24;
-  }
-  100% {
-    stroke-dashoffset: 0;
-  }
+  0% { stroke-dashoffset: 24; }
+  100% { stroke-dashoffset: 0; }
 }
-
 .animate-checkmark {
   stroke-dasharray: 24;
   stroke-dashoffset: 24;
   animation: checkmark-draw 0.3s ease-out 0.1s forwards;
 }
 
-/* Fade out and slide for completed items */
 @keyframes fade-slide-out {
-  0% {
-    opacity: 1;
-    transform: translateX(0);
-    max-height: 100px;
-  }
-  70% {
-    opacity: 0;
-    transform: translateX(20px);
-  }
-  100% {
-    opacity: 0;
-    transform: translateX(20px);
-    max-height: 0;
-    padding: 0;
-    margin: 0;
-  }
+  0% { opacity: 1; transform: translateX(0); max-height: 100px; }
+  70% { opacity: 0; transform: translateX(20px); }
+  100% { opacity: 0; transform: translateX(20px); max-height: 0; padding: 0; margin: 0; }
 }
+.animate-fade-out { animation: fade-slide-out 0.4s ease-out forwards; }
 
-.animate-fade-out {
-  animation: fade-slide-out 0.4s ease-out forwards;
-}
-
-/* Subtle pulse for urgent items */
 @keyframes subtle-pulse {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.7;
-  }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
 }
+.animate-subtle-pulse { animation: subtle-pulse 2s ease-in-out infinite; }
 
-.animate-subtle-pulse {
-  animation: subtle-pulse 2s ease-in-out infinite;
-}
-
-/* Shake for errors */
 @keyframes shake {
-  0%, 100% {
-    transform: translateX(0);
-  }
-  20%, 60% {
-    transform: translateX(-4px);
-  }
-  40%, 80% {
-    transform: translateX(4px);
-  }
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-4px); }
+  40%, 80% { transform: translateX(4px); }
 }
+.animate-shake { animation: shake 0.4s ease-out; }
 
-.animate-shake {
-  animation: shake 0.4s ease-out;
-}
-
-/* Confetti burst for celebrations (completing all payments) */
-@keyframes confetti-fall {
-  0% {
-    transform: translateY(-10px) rotate(0deg);
-    opacity: 1;
-  }
-  100% {
-    transform: translateY(100px) rotate(720deg);
-    opacity: 0;
-  }
-}
-
-/* Scale in for new items */
 @keyframes scale-in {
-  0% {
-    transform: scale(0.8);
-    opacity: 0;
-  }
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
+  0% { transform: scale(0.8); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
 }
+.animate-scale-in { animation: scale-in 0.2s ease-out; }
 
-.animate-scale-in {
-  animation: scale-in 0.2s ease-out;
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+.terminal-cursor::after {
+  content: '▊';
+  color: #FFB000;
+  animation: blink 1s step-end infinite;
+  margin-left: 2px;
+  font-size: 0.8em;
 }

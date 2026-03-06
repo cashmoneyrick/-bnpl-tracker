@@ -1,32 +1,38 @@
 import { useBNPLStore } from '../../store';
+import { useTotalOwed } from '../../store/selectors';
+import { formatCurrency } from '../../utils/currency';
+import { format } from 'date-fns';
 
 export function Header() {
   const openSettingsModal = useBNPLStore((state) => state.openSettingsModal);
+  const orders = useBNPLStore((state) => state.orders);
+  const totalOwed = useTotalOwed();
+
+  const activeOrders = orders.filter((o) => o.status === 'active').length;
 
   return (
-    <header className="flex items-center justify-between px-8 py-4 border-b border-dark-border">
-      <h1 className="text-xl font-bold text-white">Journal</h1>
-      <button
-        onClick={openSettingsModal}
-        className="p-2 rounded-lg text-gray-400 hover:bg-dark-hover hover:text-white transition-colors"
-        title="Settings"
-        aria-label="Settings"
-      >
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-          />
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-          />
-        </svg>
-      </button>
+    <header className="flex items-center justify-between px-2 py-1 border-b border-dark-border bg-dark-card text-terminal-text">
+      <div className="flex items-center gap-4">
+        <span className="text-terminal-amber font-bold tracking-wider text-sm">JOURNAL</span>
+        <span className="text-dark-border">│</span>
+        <span className="terminal-label">OWED</span>
+        <span className="text-terminal-amber font-semibold">{formatCurrency(totalOwed)}</span>
+        <span className="text-dark-border">│</span>
+        <span className="terminal-label">ACTIVE</span>
+        <span className="text-white font-semibold">{activeOrders}</span>
+      </div>
+      <div className="flex items-center gap-4">
+        <span className="text-terminal-muted text-2xs">{format(new Date(), 'EEE dd MMM yyyy HH:mm').toUpperCase()}</span>
+        <span className="text-dark-border">│</span>
+        <button
+          onClick={openSettingsModal}
+          className="text-terminal-muted hover:text-terminal-amber transition-colors text-2xs uppercase tracking-wider"
+          title="Settings"
+          aria-label="Settings"
+        >
+          CONFIG
+        </button>
+      </div>
     </header>
   );
 }
