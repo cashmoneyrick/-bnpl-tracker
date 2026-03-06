@@ -1,16 +1,13 @@
-import { useEffect, type ReactNode } from 'react';
-import { Sidebar } from './Sidebar';
+import { useEffect } from 'react';
+import { Header } from './Header';
 import { QuickAddFAB } from './QuickAddFAB';
 import { useBNPLStore } from '../../store';
 import { useTotalOwed } from '../../store/selectors';
 import { formatCurrency } from '../../utils/currency';
 import { checkPaymentsAndNotify } from '../../services/notifications';
+import { HomePage } from '../../pages/HomePage';
 
-interface LayoutProps {
-  children: ReactNode;
-}
-
-export function Layout({ children }: LayoutProps) {
+export function Layout() {
   const totalOwed = useTotalOwed();
   const initialize = useBNPLStore((state) => state.initialize);
   const isInitialized = useBNPLStore((state) => state.isInitialized);
@@ -70,10 +67,12 @@ export function Layout({ children }: LayoutProps) {
   }, [isInitialized]); // Only run once when store initializes
 
   return (
-    <div className="flex min-h-screen bg-dark-bg">
-      <Sidebar />
-      <main className="flex-1 overflow-auto relative">
-        <div className="p-8">{children}</div>
+    <div className="min-h-screen bg-dark-bg flex flex-col">
+      <Header />
+      <main className="flex-1 overflow-auto">
+        <div className="p-8">
+          <HomePage />
+        </div>
       </main>
       <QuickAddFAB />
     </div>

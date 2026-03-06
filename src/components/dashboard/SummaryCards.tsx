@@ -1,4 +1,3 @@
-import { useNavigate } from 'react-router-dom';
 import { Card } from '../shared/Card';
 import { ProgressRing } from '../shared/ProgressRing';
 import { MiniCalendar } from './MiniCalendar';
@@ -11,7 +10,7 @@ import {
 import { formatCurrency } from '../../utils/currency';
 
 export function SummaryCards() {
-  const navigate = useNavigate();
+  const openSettingsModal = useBNPLStore((state) => state.openSettingsModal);
   const totalOwed = useTotalOwed();
   const creditUtilization = useOverallCreditUtilization();
   const platforms = useBNPLStore((state) => state.platforms);
@@ -112,7 +111,7 @@ export function SummaryCards() {
           <div className="text-center py-6">
             <p className="text-gray-500 text-sm">No credit limits set</p>
             <button
-              onClick={() => navigate('/settings')}
+              onClick={() => openSettingsModal()}
               className="mt-2 text-xs text-blue-400 hover:text-blue-300"
             >
               Set up limits
@@ -179,7 +178,7 @@ export function SummaryCards() {
             </div>
 
             <button
-              onClick={() => navigate('/settings')}
+              onClick={() => openSettingsModal()}
               className="w-full mt-4 pt-3 text-xs text-blue-400 hover:text-blue-300 transition-colors border-t border-dark-border"
             >
               Manage Credit Limits

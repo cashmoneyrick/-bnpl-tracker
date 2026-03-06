@@ -1,5 +1,4 @@
 import { useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { parseISO, addDays, isSameDay } from 'date-fns';
 import { Card } from '../shared/Card';
 import { Button } from '../shared/Button';
@@ -125,7 +124,6 @@ function PaymentPopup({
 }
 
 export function UpcomingPayments() {
-  const navigate = useNavigate();
   const openOrderDetailModal = useBNPLStore((state) => state.openOrderDetailModal);
   // Get all payments for the remaining month (use 31 days to cover full month)
   const upcomingPayments = useUpcomingPayments(31);
@@ -234,15 +232,6 @@ export function UpcomingPayments() {
             ))}
           </div>
 
-          {/* View Full Calendar Link */}
-          <div className="mt-4 text-center">
-            <button
-              onClick={() => navigate('/calendar')}
-              className="text-sm text-blue-400 hover:text-blue-300 transition-colors"
-            >
-              View Full Calendar →
-            </button>
-          </div>
         </div>
       )}
 

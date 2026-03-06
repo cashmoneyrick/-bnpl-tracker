@@ -12,7 +12,7 @@ import {
   useTotalAvailableCredit,
   useOnTimeStreak,
   useUpcomingPayments,
-  useOnTimeRate,
+
   useWeeklyDeployment,
   useAllPlatformGoals,
   useTotalLimitGrowth,
@@ -165,7 +165,7 @@ export function HomePage() {
   };
 
   // Analytics
-  const onTimeRate = useOnTimeRate();
+
   const weeklyDeployment = useWeeklyDeployment();
   const platformGoals = useAllPlatformGoals();
   const limitGrowth = useTotalLimitGrowth();
@@ -174,14 +174,6 @@ export function HomePage() {
   const hasArbitrageOrders = arbitrageOrders.length > 0;
   const ordersByType = useOrdersByType();
 
-  const getTrustStatus = () => {
-    if (onTimeRate >= 100) return { message: 'Perfect record', color: 'text-green-400' };
-    if (onTimeRate >= 90) return { message: 'Excellent standing', color: 'text-green-400' };
-    if (onTimeRate >= 75) return { message: 'Good standing', color: 'text-blue-400' };
-    if (onTimeRate >= 50) return { message: 'Needs improvement', color: 'text-amber-400' };
-    return { message: 'Critical - pay on time', color: 'text-red-400' };
-  };
-  const trustStatus = getTrustStatus();
 
   const orderTypePieData = useMemo(() => {
     const data = [];
@@ -334,30 +326,6 @@ export function HomePage() {
       <div>
         <h2 className="text-2xl font-bold text-white mb-1">Capital Strategy</h2>
         <p className="text-gray-400 mb-6">Track your credit-building progress and deployment</p>
-
-        {/* Trust Score */}
-        <Card className="bg-gradient-to-br from-green-500/10 to-transparent mb-6">
-          <h3 className="text-lg font-semibold text-white mb-4">Trust Score</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div>
-              <p className="text-4xl font-bold text-white">{Math.round(onTimeRate)}%</p>
-              <p className="text-sm text-gray-400 mt-1">On-Time Payment Rate</p>
-            </div>
-            <div className="flex flex-col items-start">
-              <div className="flex items-center gap-2">
-                <svg className="w-6 h-6 text-amber-400" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M12.9 2.6l2.3 5a1 1 0 00.8.5l5.4.5a1 1 0 01.6 1.7l-4.1 3.5a1 1 0 00-.3 1l1.2 5.3a1 1 0 01-1.5 1.1L12.4 18a1 1 0 00-1 0l-4.8 2.9a1 1 0 01-1.5-1.1l1.2-5.3a1 1 0 00-.3-1L2 10.3a1 1 0 01.6-1.7l5.4-.5a1 1 0 00.8-.5l2.3-5a1 1 0 011.8 0z" />
-                </svg>
-                <p className="text-3xl font-bold text-white">{onTimeStreak}</p>
-              </div>
-              <p className="text-sm text-gray-400 mt-1">Consecutive on-time payments</p>
-            </div>
-            <div>
-              <p className={`text-xl font-semibold ${trustStatus.color}`}>{trustStatus.message}</p>
-              <p className="text-sm text-gray-400 mt-1">Current Status</p>
-            </div>
-          </div>
-        </Card>
 
         {/* Available Capital */}
         <Card className="mb-6">

@@ -40,7 +40,7 @@ interface BNPLStore {
   quickAddModalOpen: boolean;
   orderDetailModalOpen: boolean;
   selectedOrderId: string | null;
-  sidebarCollapsed: boolean;
+  settingsModalOpen: boolean;
 
   // Actions
   initialize: () => Promise<void>;
@@ -71,7 +71,8 @@ interface BNPLStore {
   closeQuickAddModal: () => void;
   openOrderDetailModal: (orderId: string) => void;
   closeOrderDetailModal: () => void;
-  toggleSidebar: () => void;
+  openSettingsModal: () => void;
+  closeSettingsModal: () => void;
 
   // Data Operations
   exportData: () => Promise<ExportedData>;
@@ -101,7 +102,7 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
   quickAddModalOpen: false,
   orderDetailModalOpen: false,
   selectedOrderId: null,
-  sidebarCollapsed: localStorage.getItem('sidebarCollapsed') === 'true',
+  settingsModalOpen: false,
 
   // Initialize store from IndexedDB
   initialize: async () => {
@@ -772,11 +773,8 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
     set({ orderDetailModalOpen: true, selectedOrderId: orderId }),
   closeOrderDetailModal: () =>
     set({ orderDetailModalOpen: false, selectedOrderId: null }),
-  toggleSidebar: () => {
-    const newState = !get().sidebarCollapsed;
-    localStorage.setItem('sidebarCollapsed', String(newState));
-    set({ sidebarCollapsed: newState });
-  },
+  openSettingsModal: () => set({ settingsModalOpen: true }),
+  closeSettingsModal: () => set({ settingsModalOpen: false }),
 
   // Export all data
   exportData: async () => {

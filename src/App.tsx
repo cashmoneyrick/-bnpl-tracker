@@ -1,34 +1,28 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Layout } from './components/layout/Layout';
 import { ErrorBoundary } from './components/shared/ErrorBoundary';
 import { ToastProvider } from './components/shared/Toast';
 import { QuickAddModal } from './components/modals/QuickAddModal';
 import { OrderDetailModal } from './components/modals/OrderDetailModal';
-import { HomePage } from './pages/HomePage';
-import { SettingsPage } from './pages/SettingsPage';
+import { SettingsModal } from './components/modals/SettingsModal';
 
 function App() {
   return (
-    <BrowserRouter>
-      <ToastProvider>
-        <div className="dark bg-dark-bg min-h-screen text-white">
-          <ErrorBoundary>
-            <Layout>
-              <Routes>
-                <Route path="/" element={<HomePage />} />
-                <Route path="/settings" element={<SettingsPage />} />
-              </Routes>
-            </Layout>
-          </ErrorBoundary>
-          <ErrorBoundary>
-            <QuickAddModal />
-          </ErrorBoundary>
-          <ErrorBoundary>
-            <OrderDetailModal />
-          </ErrorBoundary>
-        </div>
-      </ToastProvider>
-    </BrowserRouter>
+    <ToastProvider>
+      <div className="dark bg-dark-bg min-h-screen text-white">
+        <ErrorBoundary>
+          <Layout />
+        </ErrorBoundary>
+        <ErrorBoundary>
+          <QuickAddModal />
+        </ErrorBoundary>
+        <ErrorBoundary>
+          <OrderDetailModal />
+        </ErrorBoundary>
+        <ErrorBoundary>
+          <SettingsModal />
+        </ErrorBoundary>
+      </div>
+    </ToastProvider>
   );
 }
 
