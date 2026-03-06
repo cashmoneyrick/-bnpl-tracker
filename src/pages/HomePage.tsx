@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { parseISO, isToday, isTomorrow, format } from 'date-fns';
+import { parseISO, isToday, isTomorrow, format, formatDistanceToNow } from 'date-fns';
 import { useBNPLStore } from '../store';
 import {
   useTotalAvailableCredit,
@@ -15,7 +15,6 @@ import {
   useTotalOwed,
 } from '../store/selectors';
 import { formatCurrency } from '../utils/currency';
-import { PlatformIcon } from '../components/shared/PlatformIcon';
 import { OverdueAlerts } from '../components/dashboard/OverdueAlerts';
 import { PLATFORM_COLORS, DEFAULT_PLATFORMS } from '../constants/platforms';
 import type { PlatformId } from '../types';
@@ -41,6 +40,34 @@ function getBarBg(pct: number): string {
   return 'bg-terminal-green';
 }
 
+function getUtilGlow(pct: number): string {
+  if (pct >= 80) return 'text-terminal-red metric-value';
+  if (pct >= 60) return 'text-terminal-amber metric-value';
+  return 'text-terminal-green metric-value';
+}
+
+// ─── Sub-components ─────────────────────────────────────────────────────────
+
+function MetricCell({ label, value, colorClass = 'text-white', large = false }: {
+  label: string; value: string; colorClass?: string; large?: boolean;
+}) {
+  return (
+    <div className="px-3 first:pl-1">
+      <span className="terminal-label block">{label}</span>
+      <span className={`font-semibold ${colorClass} ${large ? 'text-base metric-value' : ''}`}>{value}</span>
+    </div>
+  );
+}
+
+function EmptyState({ message }: { message: string }) {
+  return (
+    <div className="text-terminal-muted text-2xs py-6 text-center flex flex-col items-center gap-1">
+      <span className="text-dark-border text-lg">—</span>
+      <span>{message}</span>
+    </div>
+  );
+}
+
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
 export function HomePage() {
@@ -63,9 +90,11 @@ export function HomePage() {
 
   const totalLimit = platforms.reduce((sum, p) => sum + p.creditLimit, 0);
   const activeOrders = orders.filter((o) => o.status === 'active');
+  const completedOrders = orders.filter((o) => o.status === 'completed');
   const dueThisWeek = upcomingPayments.reduce((sum, p) => sum + p.amount, 0);
 
   const [activePlatformTab, setActivePlatformTab] = useState<PlatformId | 'all'>('all');
+  const [orderView, setOrderView] = useState<'active' | 'completed'>('active');
 
   const platformCredits = utilizations
     .filter((u) => u.limit > 0)
@@ -75,10 +104,17 @@ export function HomePage() {
     })
     .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
 
-  const filteredOrders = useMemo(() => {
+  const filteredActiveOrders = useMemo(() => {
     const base = activePlatformTab === 'all' ? activeOrders : activeOrders.filter((o) => o.platformId === activePlatformTab);
     return base.sort((a, b) => parseISO(b.createdAt).getTime() - parseISO(a.createdAt).getTime());
   }, [activeOrders, activePlatformTab]);
+
+  const filteredCompletedOrders = useMemo(() => {
+    const base = activePlatformTab === 'all' ? completedOrders : completedOrders.filter((o) => o.platformId === activePlatformTab);
+    return base.sort((a, b) => parseISO(b.createdAt).getTime() - parseISO(a.createdAt).getTime()).slice(0, 20);
+  }, [completedOrders, activePlatformTab]);
+
+  const displayOrders = orderView === 'active' ? filteredActiveOrders : filteredCompletedOrders;
 
   const getPaymentStoreName = (payment: (typeof upcomingPayments)[0]) => {
     const order = orders.find((o) => o.id === payment.orderId);
@@ -93,34 +129,19 @@ export function HomePage() {
     <div className="space-y-0">
 
       {/* ═══ ZONE 1: METRICS STRIP ═══ */}
-      <div className="border border-dark-border bg-dark-card p-2 mb-0">
-        <div className="flex items-center flex-wrap gap-y-1 divide-x divide-dark-border">
-          <div className="px-3 first:pl-0">
-            <span className="terminal-label">AVAILABLE</span>
-            <span className="ml-2 text-terminal-green font-semibold">{formatCurrency(totalAvailable)}</span>
-          </div>
+      <div className="border border-dark-border bg-dark-card p-2 mb-0 fade-up-1">
+        <div className="flex items-center flex-wrap gap-y-2 divide-x divide-dark-border">
+          <MetricCell label="AVAILABLE" value={formatCurrency(totalAvailable)} colorClass="text-terminal-green" large />
+          <MetricCell label="USED" value={formatCurrency(totalOwed)} colorClass={getUtilColor(creditUtilization.percentage)} large />
+          <MetricCell label="DUE 7D" value={formatCurrency(dueThisWeek)} colorClass={dueThisWeek > 0 ? 'text-terminal-amber' : 'text-white'} large />
+          <MetricCell label="ACTIVE" value={String(activeOrders.length)} />
           <div className="px-3">
-            <span className="terminal-label">USED</span>
-            <span className={`ml-2 font-semibold ${getUtilColor(creditUtilization.percentage)}`}>{formatCurrency(totalOwed)}</span>
-          </div>
-          <div className="px-3">
-            <span className="terminal-label">DUE 7D</span>
-            <span className="ml-2 text-white font-semibold">{formatCurrency(dueThisWeek)}</span>
-          </div>
-          <div className="px-3">
-            <span className="terminal-label">ACTIVE</span>
-            <span className="ml-2 text-white font-semibold">{activeOrders.length}</span>
-          </div>
-          <div className="px-3">
-            <span className="terminal-label">UTIL</span>
-            <span className={`ml-2 font-bold ${getUtilColor(creditUtilization.percentage)}`}>
+            <span className="terminal-label block">UTIL</span>
+            <span className={`font-bold text-base ${getUtilGlow(creditUtilization.percentage)}`}>
               {creditUtilization.percentage.toFixed(0)}%
             </span>
           </div>
-          <div className="px-3">
-            <span className="terminal-label">LIMIT</span>
-            <span className="ml-2 text-terminal-muted font-semibold">{formatCurrency(totalLimit)}</span>
-          </div>
+          <MetricCell label="LIMIT" value={formatCurrency(totalLimit)} colorClass="text-terminal-muted" />
         </div>
       </div>
 
@@ -128,17 +149,17 @@ export function HomePage() {
       <OverdueAlerts />
 
       {/* ═══ ZONE 2: MAIN DASHBOARD (Grid) ═══ */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] border-x border-dark-border">
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] border-x border-dark-border fade-up-2">
 
         {/* ── LEFT: Platform View ── */}
         <div className="border-b lg:border-b-0 lg:border-r border-dark-border">
           {/* Platform Tabs */}
-          <div className="flex items-center border-b border-dark-border px-2 py-1 gap-0 overflow-x-auto">
+          <div className="flex items-center border-b border-dark-border px-1 py-0 gap-0 overflow-x-auto">
             <button
               onClick={() => setActivePlatformTab('all')}
-              className={`px-3 py-1 text-2xs uppercase tracking-wider transition-colors whitespace-nowrap ${
+              className={`px-3 py-1.5 text-2xs uppercase tracking-wider transition-colors whitespace-nowrap ${
                 activePlatformTab === 'all'
-                  ? 'text-terminal-amber border-b-2 border-terminal-amber'
+                  ? 'text-terminal-amber border-b-2 border-terminal-amber bg-terminal-amber/5'
                   : 'text-terminal-muted hover:text-terminal-text'
               }`}
             >
@@ -148,12 +169,12 @@ export function HomePage() {
               <button
                 key={p.id}
                 onClick={() => setActivePlatformTab(p.id as PlatformId)}
-                className={`px-3 py-1 text-2xs uppercase tracking-wider transition-colors whitespace-nowrap ${
+                className={`px-3 py-1.5 text-2xs uppercase tracking-wider transition-colors whitespace-nowrap ${
                   activePlatformTab === p.id
                     ? 'border-b-2 text-white'
                     : 'text-terminal-muted hover:text-terminal-text'
                 }`}
-                style={activePlatformTab === p.id ? { borderColor: p.color, color: p.color } : undefined}
+                style={activePlatformTab === p.id ? { borderColor: p.color, color: p.color, background: `${p.color}08` } : undefined}
               >
                 {p.name}
               </button>
@@ -166,13 +187,16 @@ export function HomePage() {
               <div className="terminal-label mb-2">CREDIT BY PLATFORM</div>
               <div className="space-y-1.5">
                 {platformCredits.map(({ platform, used, available, limit, percentage }) => (
-                  <div key={platform.id} className="flex items-center gap-2 text-2xs">
-                    <span className="w-16 text-terminal-muted truncate">{platform.name.toUpperCase()}</span>
-                    <div className="flex-1 h-1.5 bg-dark-hover overflow-hidden">
-                      <div className={`h-full ${getBarBg(percentage)}`} style={{ width: `${Math.min(percentage, 100)}%` }} />
+                  <div key={platform.id} className="flex items-center gap-2 text-2xs row-glow py-0.5 -mx-1 px-1">
+                    <span className="w-16 text-terminal-muted truncate uppercase">{platform.name}</span>
+                    <div className="flex-1 h-1.5 bg-dark-hover overflow-hidden relative">
+                      <div
+                        className={`h-full transition-all duration-500 ${getBarBg(percentage)}`}
+                        style={{ width: `${Math.min(percentage, 100)}%` }}
+                      />
                     </div>
-                    <span className="w-14 text-right text-terminal-green">{formatCurrency(available)}</span>
-                    <span className="w-12 text-right text-terminal-muted">{formatCurrency(limit)}</span>
+                    <span className="w-16 text-right text-terminal-green font-medium">{formatCurrency(available)}</span>
+                    <span className="w-14 text-right text-terminal-muted">{formatCurrency(limit)}</span>
                     <span className={`w-8 text-right font-semibold ${getUtilColor(percentage)}`}>{Math.round(percentage)}%</span>
                   </div>
                 ))}
@@ -180,10 +204,37 @@ export function HomePage() {
             </div>
           )}
 
-          {/* Active Orders Table */}
+          {/* Orders Section Header with Active/Completed Toggle */}
+          <div className="flex items-center justify-between border-b border-dark-border px-2 py-1">
+            <div className="flex items-center gap-0">
+              <button
+                onClick={() => setOrderView('active')}
+                className={`px-2 py-0.5 text-2xs uppercase tracking-wider transition-colors ${
+                  orderView === 'active'
+                    ? 'text-terminal-amber'
+                    : 'text-terminal-muted hover:text-terminal-text'
+                }`}
+              >
+                ACTIVE ({activeOrders.length})
+              </button>
+              <span className="text-dark-border">│</span>
+              <button
+                onClick={() => setOrderView('completed')}
+                className={`px-2 py-0.5 text-2xs uppercase tracking-wider transition-colors ${
+                  orderView === 'completed'
+                    ? 'text-terminal-green'
+                    : 'text-terminal-muted hover:text-terminal-text'
+                }`}
+              >
+                COMPLETED ({completedOrders.length})
+              </button>
+            </div>
+            <span className="text-2xs text-dark-border">{displayOrders.length} shown</span>
+          </div>
+
+          {/* Orders Table */}
           <div className="p-2">
-            <div className="terminal-label mb-2">ACTIVE ORDERS ({filteredOrders.length})</div>
-            {filteredOrders.length > 0 ? (
+            {displayOrders.length > 0 ? (
               <table className="w-full text-2xs">
                 <thead>
                   <tr className="text-terminal-muted border-b border-dark-border">
@@ -191,38 +242,44 @@ export function HomePage() {
                     <th className="text-left py-1 font-medium">PLATFORM</th>
                     <th className="text-right py-1 font-medium">AMOUNT</th>
                     <th className="text-right py-1 font-medium">STATUS</th>
-                    <th className="text-right py-1 font-medium">CREATED</th>
+                    <th className="text-right py-1 font-medium">{orderView === 'active' ? 'CREATED' : 'COMPLETED'}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredOrders.map((order) => {
+                  {displayOrders.map((order) => {
                     const platform = platforms.find((p) => p.id === order.platformId);
                     return (
                       <tr
                         key={order.id}
-                        className="border-b border-dark-border/50 hover:bg-dark-hover cursor-pointer transition-colors"
+                        className="border-b border-dark-border/50 row-glow cursor-pointer transition-colors"
                         onClick={() => openOrderDetailModal(order.id)}
                       >
                         <td className="py-1.5 text-white">{order.storeName || '—'}</td>
                         <td className="py-1.5" style={{ color: platform?.color }}>{platform?.name}</td>
                         <td className="py-1.5 text-right text-terminal-amber font-semibold">{formatCurrency(order.totalAmount)}</td>
                         <td className="py-1.5 text-right">
-                          <span className="text-terminal-green">ACTIVE</span>
+                          {order.status === 'active' ? (
+                            <span className="text-terminal-green">ACTIVE</span>
+                          ) : (
+                            <span className="text-terminal-muted">DONE</span>
+                          )}
                         </td>
-                        <td className="py-1.5 text-right text-terminal-muted">{format(parseISO(order.createdAt), 'MM/dd')}</td>
+                        <td className="py-1.5 text-right text-terminal-muted">
+                          {format(parseISO(order.status === 'completed' && order.completedAt ? order.completedAt : order.createdAt), 'MM/dd')}
+                        </td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
             ) : (
-              <div className="text-terminal-muted text-2xs py-4 text-center">NO ACTIVE ORDERS</div>
+              <EmptyState message={orderView === 'active' ? 'NO ACTIVE ORDERS' : 'NO COMPLETED ORDERS'} />
             )}
           </div>
         </div>
 
         {/* ── RIGHT: Upcoming & Analytics ── */}
-        <div>
+        <div className="fade-up-3">
           {/* Upcoming Payments */}
           <div className="border-b border-dark-border p-2">
             <div className="terminal-label mb-2">UPCOMING PAYMENTS</div>
@@ -230,14 +287,17 @@ export function HomePage() {
               <div className="space-y-0">
                 {upcomingPayments.slice(0, 8).map((payment) => {
                   const platformColor = PLATFORM_COLORS[payment.platformId] || '#6b7280';
+                  const isUrgent = isToday(parseISO(payment.dueDate)) || isTomorrow(parseISO(payment.dueDate));
                   return (
-                    <div key={payment.id} className="flex items-center justify-between py-1.5 border-b border-dark-border/50 last:border-0 text-2xs">
-                      <div className="flex items-center gap-2">
-                        <span className="w-1.5 h-1.5" style={{ backgroundColor: platformColor }} />
-                        <span className="text-white">{getPaymentStoreName(payment)}</span>
+                    <div key={payment.id} className="flex items-center justify-between py-1.5 border-b border-dark-border/50 last:border-0 text-2xs row-glow -mx-1 px-1">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="w-1.5 h-1.5 shrink-0" style={{ backgroundColor: platformColor }} />
+                        <span className="text-white truncate">{getPaymentStoreName(payment)}</span>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-terminal-muted">{formatDueDate(payment.dueDate)}</span>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <span className={`${isUrgent ? 'text-terminal-red font-medium' : 'text-terminal-muted'}`}>
+                          {formatDueDate(payment.dueDate)}
+                        </span>
                         <span className="text-terminal-amber font-semibold w-16 text-right">{formatCurrency(payment.amount)}</span>
                       </div>
                     </div>
@@ -245,20 +305,20 @@ export function HomePage() {
                 })}
               </div>
             ) : (
-              <div className="text-terminal-muted text-2xs py-4 text-center">NO UPCOMING PAYMENTS</div>
+              <EmptyState message="NO UPCOMING PAYMENTS" />
             )}
           </div>
 
           {/* Weekly Deployment */}
           <div className="border-b border-dark-border p-2">
             <div className="terminal-label mb-1">WEEKLY DEPLOYMENT</div>
-            <div className="flex items-center justify-between text-2xs mb-1">
-              <span className="text-white font-semibold">{formatCurrency(weeklyDeployment.amount)}</span>
+            <div className="flex items-baseline justify-between text-2xs mb-1.5">
+              <span className="text-white font-semibold text-sm metric-value">{formatCurrency(weeklyDeployment.amount)}</span>
               <span className="text-terminal-muted">/ $600</span>
             </div>
-            <div className="h-1.5 bg-dark-hover overflow-hidden">
+            <div className="h-1 bg-dark-hover overflow-hidden">
               <div
-                className={`h-full ${weeklyDeployment.isOverExtended ? 'bg-terminal-red' : weeklyDeployment.warningThreshold ? 'bg-terminal-amber' : 'bg-terminal-green'}`}
+                className={`h-full transition-all duration-500 ${weeklyDeployment.isOverExtended ? 'bg-terminal-red' : weeklyDeployment.warningThreshold ? 'bg-terminal-amber' : 'bg-terminal-green'}`}
                 style={{ width: `${Math.min((weeklyDeployment.amount / 60000) * 100, 100)}%` }}
               />
             </div>
@@ -268,15 +328,18 @@ export function HomePage() {
           {allGoals.length > 0 && (
             <div className="border-b border-dark-border p-2">
               <div className="terminal-label mb-2">PLATFORM GOALS</div>
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 {allGoals.map(({ platform, currentLimit, goalLimit, progress }) => (
                   <div key={platform.id} className="text-2xs">
                     <div className="flex items-center justify-between mb-0.5">
-                      <span style={{ color: platform.color }}>{platform.name.toUpperCase()}</span>
+                      <span className="font-medium" style={{ color: platform.color }}>{platform.name.toUpperCase()}</span>
                       <span className="text-terminal-muted">{formatCurrency(currentLimit)}/{formatCurrency(goalLimit)}</span>
                     </div>
                     <div className="h-1 bg-dark-hover overflow-hidden">
-                      <div className="h-full" style={{ width: `${Math.min(progress, 100)}%`, backgroundColor: platform.color }} />
+                      <div
+                        className="h-full transition-all duration-500"
+                        style={{ width: `${Math.min(progress, 100)}%`, backgroundColor: platform.color }}
+                      />
                     </div>
                   </div>
                 ))}
@@ -308,7 +371,7 @@ export function HomePage() {
       </div>
 
       {/* ═══ ZONE 3: ANALYTICS STRIP ═══ */}
-      <div className="border border-dark-border bg-dark-card">
+      <div className="border border-dark-border bg-dark-card fade-up-4">
         <div className="grid grid-cols-1 md:grid-cols-4 divide-y md:divide-y-0 md:divide-x divide-dark-border">
 
           {/* Order Breakdown */}
@@ -322,7 +385,7 @@ export function HomePage() {
               ].map(({ key, label, color }) => {
                 const data = ordersByType[key as keyof typeof ordersByType];
                 return (
-                  <div key={key} className="flex items-center justify-between">
+                  <div key={key} className="flex items-center justify-between row-glow -mx-1 px-1 py-0.5">
                     <div className="flex items-center gap-2">
                       <span className="w-2 h-2" style={{ backgroundColor: color }} />
                       <span className="text-terminal-muted">{label}</span>
@@ -357,7 +420,7 @@ export function HomePage() {
                   <span className="text-white font-semibold">{formatCurrency(arbitrageStats.totalSaleAmount)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-terminal-muted">NET</span>
+                  <span className="text-terminal-muted">NET P&L</span>
                   <span className={`font-semibold ${arbitrageStats.totalNetCash >= 0 ? 'text-terminal-green' : 'text-terminal-red'}`}>
                     {arbitrageStats.totalNetCash >= 0 ? '+' : ''}{formatCurrency(Math.abs(arbitrageStats.totalNetCash))}
                   </span>
@@ -368,7 +431,7 @@ export function HomePage() {
                 </div>
               </div>
             ) : (
-              <div className="text-terminal-muted text-2xs">NO ARBITRAGE DATA</div>
+              <div className="text-terminal-muted text-2xs py-2">NO ARBITRAGE DATA</div>
             )}
           </div>
 
@@ -376,9 +439,9 @@ export function HomePage() {
           <div className="p-2">
             <div className="terminal-label mb-2">CAPITAL</div>
             <div className="space-y-1 text-2xs">
-              <div className="flex justify-between">
+              <div className="flex justify-between items-baseline">
                 <span className="text-terminal-muted">AVAILABLE</span>
-                <span className="text-terminal-green font-bold text-sm">{formatCurrency(totalAvailable)}</span>
+                <span className="text-terminal-green font-bold text-sm metric-value">{formatCurrency(totalAvailable)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-terminal-muted">WEEKLY</span>
@@ -405,7 +468,7 @@ export function HomePage() {
                     const platform = platforms.find((p) => p.id === change.platformId);
                     const increase = change.newLimit - change.previousLimit;
                     return (
-                      <div key={change.id} className="flex items-center justify-between">
+                      <div key={change.id} className="flex items-center justify-between row-glow -mx-1 px-1 py-0.5">
                         <span className="text-terminal-muted">{platform?.name?.toUpperCase() || change.platformId}</span>
                         <span className={`font-semibold ${increase >= 0 ? 'text-terminal-green' : 'text-terminal-red'}`}>
                           {increase >= 0 ? '+' : ''}{formatCurrency(increase)}
@@ -415,7 +478,7 @@ export function HomePage() {
                   })}
               </div>
             ) : (
-              <div className="text-terminal-muted text-2xs">NO CHANGES</div>
+              <div className="text-terminal-muted text-2xs py-2">NO CHANGES</div>
             )}
           </div>
         </div>
