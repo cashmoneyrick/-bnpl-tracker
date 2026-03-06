@@ -57,12 +57,12 @@ export function Layout() {
     <div className="min-h-screen bg-dark-bg flex flex-col font-mono">
       <Header />
       <main className="flex-1 overflow-auto">
-        <div className="p-2">
+        <div className="p-3 sm:p-2">
           <HomePage />
         </div>
       </main>
-      {/* Status Bar */}
-      <footer className="px-2 py-1 border-t border-dark-border bg-dark-card flex items-center justify-between text-2xs text-terminal-muted">
+      {/* Status Bar — desktop only */}
+      <footer className="hidden sm:flex px-2 py-1 border-t border-dark-border bg-dark-card items-center justify-between text-2xs text-terminal-muted">
         <div className="flex items-center gap-3">
           <span className="text-terminal-amber">JOURNAL v1.0</span>
           <span className="text-dark-border">│</span>
