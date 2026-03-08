@@ -1,5 +1,4 @@
 import { useEffect } from 'react';
-import { Header } from './Header';
 import { useBNPLStore } from '../../store';
 import { useTotalOwed } from '../../store/selectors';
 import { formatCurrency } from '../../utils/currency';
@@ -12,9 +11,9 @@ export function Layout() {
   const isInitialized = useBNPLStore((state) => state.isInitialized);
   const payments = useBNPLStore((state) => state.payments);
   const platforms = useBNPLStore((state) => state.platforms);
-  const orders = useBNPLStore((state) => state.orders);
   const notificationSettings = useBNPLStore((state) => state.notificationSettings);
   const openQuickAddModal = useBNPLStore((state) => state.openQuickAddModal);
+  const liveModeEnabled = useBNPLStore((state) => state.liveModeEnabled);
 
   useEffect(() => {
     initialize();
@@ -37,9 +36,10 @@ export function Layout() {
 
   useEffect(() => {
     const updateOverdue = useBNPLStore.getState().updateOverduePayments;
-    const interval = setInterval(() => { updateOverdue(); }, 60 * 60 * 1000);
+    const ms = liveModeEnabled ? 30 * 1000 : 60 * 60 * 1000;
+    const interval = setInterval(() => { updateOverdue(); }, ms);
     return () => clearInterval(interval);
-  }, []);
+  }, [liveModeEnabled]);
 
   useEffect(() => {
     if (!isInitialized) return;
@@ -50,34 +50,13 @@ export function Layout() {
     checkPaymentsAndNotify(payments, notificationSettings, platformNames);
   }, [isInitialized]);
 
-  const activeOrders = orders.filter((o) => o.status === 'active').length;
-  const completedOrders = orders.filter((o) => o.status === 'completed').length;
-
   return (
-    <div className="min-h-screen bg-dark-bg flex flex-col font-mono">
-      <Header />
-      <main className="flex-1 overflow-auto">
+    <div className="min-h-screen bg-dark-bg font-mono">
+      <main className="overflow-auto">
         <div className="p-3 sm:p-2">
           <HomePage />
         </div>
       </main>
-      {/* Status Bar — desktop only */}
-      <footer className="hidden sm:flex px-2 py-1 border-t border-dark-border bg-dark-card items-center justify-between text-2xs text-terminal-muted">
-        <div className="flex items-center gap-3">
-          <span className="text-terminal-amber">JOURNAL v1.0</span>
-          <span className="text-dark-border">│</span>
-          <span>{activeOrders} ACTIVE</span>
-          <span className="text-dark-border">│</span>
-          <span>{completedOrders} COMPLETED</span>
-          <span className="text-dark-border">│</span>
-          <span>{platforms.length} PLATFORMS</span>
-        </div>
-        <div className="flex items-center gap-3">
-          <span>⌘N ADD</span>
-          <span className="text-dark-border">│</span>
-          <span>GEAR CONFIG</span>
-        </div>
-      </footer>
     </div>
   );
 }
