@@ -11,8 +11,11 @@ import type {
   NotificationSettings,
   LimitChange,
 } from '../types';
+import type { ThemePreset } from '../types/theme';
+import type { CalendarEvent } from '../types/calendar';
 import type { PlatformTier } from '../constants/platforms';
-import { storage } from '../services/storage';
+import { DEFAULT_PRESET_ID } from '../constants/themes';
+import { storage, type PaycheckSettings } from '../services/storage';
 import { migrateToV2, migrateToV3 } from '../services/migrations';
 import {
   calculatePayments,
@@ -32,6 +35,10 @@ interface BNPLStore {
   limitHistory: LimitChange[];
   notificationSettings: NotificationSettings;
   geminiApiKey: string | null;
+  activeThemePresetId: string;
+  customThemePresets: ThemePreset[];
+  calendarEvents: CalendarEvent[];
+  paycheckSettings: PaycheckSettings | null;
   isLoading: boolean;
   isInitialized: boolean;
   isInitializing: boolean; // Lock to prevent race conditions
@@ -40,7 +47,7 @@ interface BNPLStore {
   quickAddModalOpen: boolean;
   orderDetailModalOpen: boolean;
   selectedOrderId: string | null;
-  settingsModalOpen: boolean;
+  liveModeEnabled: boolean;
 
   // Actions
   initialize: () => Promise<void>;
@@ -48,6 +55,7 @@ interface BNPLStore {
   updateOrder: (id: string, updates: Partial<Order>) => Promise<void>;
   deleteOrder: (id: string) => Promise<void>;
   markPaymentPaid: (paymentId: string, customPaidDate?: string) => Promise<void>;
+  batchMarkPaid: (paymentIds: string[]) => Promise<number>;
   markPaymentUnpaid: (paymentId: string) => Promise<void>;
   updatePayment: (id: string, updates: Partial<Payment>) => Promise<void>;
   deletePayment: (paymentId: string) => Promise<void>;
@@ -64,6 +72,14 @@ interface BNPLStore {
   updateOverduePayments: () => Promise<void>;
   updateNotificationSettings: (settings: NotificationSettings) => void;
   setGeminiApiKey: (key: string | null) => void;
+  setActiveThemePreset: (presetId: string) => void;
+  saveCustomThemePreset: (preset: ThemePreset) => void;
+  updateCustomThemePreset: (presetId: string, updates: Partial<ThemePreset>) => void;
+  deleteCustomThemePreset: (presetId: string) => void;
+  addCalendarEvent: (event: CalendarEvent) => void;
+  updateCalendarEvent: (id: string, updates: Partial<CalendarEvent>) => void;
+  deleteCalendarEvent: (id: string) => void;
+  setPaycheckSettings: (settings: PaycheckSettings | null) => void;
   getLimitHistory: (platformId: PlatformId) => LimitChange[];
 
   // UI Actions
@@ -71,8 +87,7 @@ interface BNPLStore {
   closeQuickAddModal: () => void;
   openOrderDetailModal: (orderId: string) => void;
   closeOrderDetailModal: () => void;
-  openSettingsModal: () => void;
-  closeSettingsModal: () => void;
+  toggleLiveMode: () => void;
 
   // Data Operations
   exportData: () => Promise<ExportedData>;
@@ -94,6 +109,10 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
     notifyOverdue: true,
   },
   geminiApiKey: null,
+  activeThemePresetId: DEFAULT_PRESET_ID,
+  customThemePresets: [],
+  calendarEvents: [],
+  paycheckSettings: null,
   isLoading: false,
   isInitialized: false,
   isInitializing: false,
@@ -102,7 +121,7 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
   quickAddModalOpen: false,
   orderDetailModalOpen: false,
   selectedOrderId: null,
-  settingsModalOpen: false,
+  liveModeEnabled: false,
 
   // Initialize store from IndexedDB
   initialize: async () => {
@@ -155,7 +174,9 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
 
       const notificationSettings = storage.getNotificationSettings();
       const geminiApiKey = storage.getGeminiApiKey();
-
+      const themeSettings = storage.getThemeSettings();
+      const calendarEvents = storage.getCalendarEvents();
+      const paycheckSettings = storage.getPaycheckSettings();
       set({
         orders: migrated.orders,
         payments,
@@ -164,6 +185,10 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
         limitHistory,
         notificationSettings,
         geminiApiKey,
+        activeThemePresetId: themeSettings.activePresetId,
+        customThemePresets: themeSettings.customPresets,
+        calendarEvents,
+        paycheckSettings,
         isLoading: false,
         isInitialized: true,
         isInitializing: false,
@@ -434,6 +459,65 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
           )
         : state.orders,
     }));
+  },
+
+  // Batch mark multiple payments as paid
+  batchMarkPaid: async (paymentIds: string[]) => {
+    const { payments, orders } = get();
+    let count = 0;
+    const updatedPayments: Payment[] = [];
+    const completedOrderIds = new Set<string>();
+
+    for (const paymentId of paymentIds) {
+      const payment = payments.find((p) => p.id === paymentId);
+      if (!payment || payment.status === 'paid') continue;
+
+      const paidDateValue = new Date();
+      const dueDate = parseISO(payment.dueDate);
+      const paidOnTime = !isBefore(startOfDay(dueDate), startOfDay(paidDateValue));
+
+      const updated: Payment = {
+        ...payment,
+        status: 'paid',
+        paidDate: paidDateValue.toISOString(),
+        paidOnTime,
+      };
+
+      await storage.savePayment(updated);
+      updatedPayments.push(updated);
+      count++;
+
+      // Check if order is now fully paid
+      const orderPayments = payments.filter((p) => p.orderId === payment.orderId);
+      const allPaid = orderPayments.every(
+        (p) => paymentIds.includes(p.id) || p.status === 'paid'
+      );
+      if (allPaid) completedOrderIds.add(payment.orderId);
+    }
+
+    // Complete orders
+    const updatedOrders: Order[] = [];
+    for (const orderId of completedOrderIds) {
+      const order = orders.find((o) => o.id === orderId);
+      if (order) {
+        const updated = { ...order, status: 'completed' as const };
+        await storage.saveOrder(updated);
+        updatedOrders.push(updated);
+      }
+    }
+
+    set((state) => ({
+      payments: state.payments.map((p) => {
+        const updated = updatedPayments.find((u) => u.id === p.id);
+        return updated || p;
+      }),
+      orders: state.orders.map((o) => {
+        const updated = updatedOrders.find((u) => u.id === o.id);
+        return updated || o;
+      }),
+    }));
+
+    return count;
   },
 
   // Mark a payment as unpaid (undo)
@@ -758,6 +842,63 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
     set({ geminiApiKey: key });
   },
 
+  // Theme actions
+  setActiveThemePreset: (presetId: string) => {
+    const { customThemePresets } = get();
+    set({ activeThemePresetId: presetId });
+    storage.saveThemeSettings({ activePresetId: presetId, customPresets: customThemePresets });
+  },
+
+  saveCustomThemePreset: (preset: ThemePreset) => {
+    const { customThemePresets, activeThemePresetId } = get();
+    const updated = [...customThemePresets, preset];
+    set({ customThemePresets: updated });
+    storage.saveThemeSettings({ activePresetId: activeThemePresetId, customPresets: updated });
+  },
+
+  updateCustomThemePreset: (presetId: string, updates: Partial<ThemePreset>) => {
+    const { customThemePresets, activeThemePresetId } = get();
+    const updated = customThemePresets.map(p => p.id === presetId ? { ...p, ...updates } : p);
+    set({ customThemePresets: updated });
+    storage.saveThemeSettings({ activePresetId: activeThemePresetId, customPresets: updated });
+  },
+
+  deleteCustomThemePreset: (presetId: string) => {
+    const { customThemePresets, activeThemePresetId } = get();
+    const updated = customThemePresets.filter(p => p.id !== presetId);
+    const newActiveId = activeThemePresetId === presetId ? DEFAULT_PRESET_ID : activeThemePresetId;
+    set({ customThemePresets: updated, activeThemePresetId: newActiveId });
+    storage.saveThemeSettings({ activePresetId: newActiveId, customPresets: updated });
+  },
+
+  // Calendar event actions
+  addCalendarEvent: (event: CalendarEvent) => {
+    const { calendarEvents } = get();
+    const updated = [...calendarEvents, event];
+    set({ calendarEvents: updated });
+    storage.saveCalendarEvents(updated);
+  },
+
+  updateCalendarEvent: (id: string, updates: Partial<CalendarEvent>) => {
+    const { calendarEvents } = get();
+    const updated = calendarEvents.map(e => e.id === id ? { ...e, ...updates } : e);
+    set({ calendarEvents: updated });
+    storage.saveCalendarEvents(updated);
+  },
+
+  deleteCalendarEvent: (id: string) => {
+    const { calendarEvents } = get();
+    const updated = calendarEvents.filter(e => e.id !== id);
+    set({ calendarEvents: updated });
+    storage.saveCalendarEvents(updated);
+  },
+
+  // Paycheck settings
+  setPaycheckSettings: (settings: PaycheckSettings | null) => {
+    storage.savePaycheckSettings(settings);
+    set({ paycheckSettings: settings });
+  },
+
   // Get limit history for a platform
   getLimitHistory: (platformId: PlatformId) => {
     const { limitHistory } = get();
@@ -773,8 +914,7 @@ export const useBNPLStore = create<BNPLStore>((set, get) => ({
     set({ orderDetailModalOpen: true, selectedOrderId: orderId }),
   closeOrderDetailModal: () =>
     set({ orderDetailModalOpen: false, selectedOrderId: null }),
-  openSettingsModal: () => set({ settingsModalOpen: true }),
-  closeSettingsModal: () => set({ settingsModalOpen: false }),
+  toggleLiveMode: () => set((state) => ({ liveModeEnabled: !state.liveModeEnabled })),
 
   // Export all data
   exportData: async () => {

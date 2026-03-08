@@ -1,14 +1,19 @@
 import { useMemo } from 'react';
 import {
   parseISO,
+  format,
   isWithinInterval,
+  isBefore,
+  isAfter,
   startOfDay,
   endOfDay,
   startOfMonth,
   endOfMonth,
   addDays,
+  addWeeks,
   subDays,
   subMonths,
+  differenceInDays,
   differenceInMonths,
 } from 'date-fns';
 import { useBNPLStore } from './index';
@@ -25,6 +30,7 @@ import type {
 import type { PlatformTier } from '../constants/platforms';
 import { getEnrichedPlatform } from '../constants/platforms';
 import { getRecommendations, type PlatformRecommendation } from '../services/platformRecommender';
+import { formatCurrency } from '../utils/currency';
 
 /**
  * Get total amount owed across all platforms
@@ -1065,4 +1071,762 @@ export function usePlatformRecommendations(orderAmount: number): PlatformRecomme
     const enriched = platforms.map(getEnrichedPlatform);
     return getRecommendations(orderAmount, enriched, payments);
   }, [orderAmount, platforms, payments]);
+}
+
+// ─── Sprint 1: Incoming Payments & Risk Clustering ───────────────────────────
+
+export type ExposureStatus = 'NOMINAL' | 'ELEVATED' | 'CRITICAL';
+
+export function getExposureStatus(percentage: number): ExposureStatus {
+  if (percentage >= 80) return 'CRITICAL';
+  if (percentage >= 60) return 'ELEVATED';
+  return 'NOMINAL';
+}
+
+export function getExposureColor(status: ExposureStatus): string {
+  if (status === 'CRITICAL') return 'text-terminal-red';
+  if (status === 'ELEVATED') return 'text-terminal-amber';
+  return 'text-terminal-green';
+}
+
+/**
+ * Incoming payment day — a date with its associated payments
+ */
+export interface IncomingDay {
+  date: string; // ISO date
+  label: string; // "MAR 08 (SAT)"
+  payments: (Payment & { orderProgress: { total: number; paid: number } })[];
+  dayTotal: number;
+}
+
+/**
+ * Get incoming payments grouped by date for the next N days.
+ * Includes overdue payments as a separate group at the top.
+ */
+export function useIncomingPayments(days: number = 14): {
+  days: IncomingDay[];
+  overdue: IncomingDay | null;
+  grandTotal: number;
+  overdueTotal: number;
+  paymentCount: number;
+} {
+  const payments = useBNPLStore((state) => state.payments);
+
+  return useMemo(() => {
+    const today = startOfDay(new Date());
+    const futureDate = endOfDay(addDays(today, days));
+
+    // Get overdue payments
+    const overduePayments = payments
+      .filter((p) => p.status === 'overdue')
+      .sort((a, b) => parseISO(a.dueDate).getTime() - parseISO(b.dueDate).getTime());
+
+    // Get upcoming payments (pending within window)
+    const upcoming = payments
+      .filter((p) => {
+        if (p.status === 'paid') return false;
+        if (p.status === 'overdue') return false;
+        const dueDate = parseISO(p.dueDate);
+        return isWithinInterval(dueDate, { start: today, end: futureDate });
+      })
+      .sort((a, b) => parseISO(a.dueDate).getTime() - parseISO(b.dueDate).getTime());
+
+    // Helper: compute order progress for a payment
+    const getProgress = (payment: Payment) => {
+      const orderPayments = payments.filter((p) => p.orderId === payment.orderId);
+      const total = orderPayments.length;
+      const paid = orderPayments.filter((p) => p.status === 'paid').length;
+      return { total, paid };
+    };
+
+    // Group upcoming by date
+    const dayMap = new Map<string, IncomingDay>();
+    for (const payment of upcoming) {
+      const dateKey = payment.dueDate.split('T')[0];
+      if (!dayMap.has(dateKey)) {
+        const d = parseISO(dateKey);
+        dayMap.set(dateKey, {
+          date: dateKey,
+          label: format(d, 'MMM dd (EEE)').toUpperCase(),
+          payments: [],
+          dayTotal: 0,
+        });
+      }
+      const day = dayMap.get(dateKey)!;
+      day.payments.push({ ...payment, orderProgress: getProgress(payment) });
+      day.dayTotal += payment.amount;
+    }
+
+    const sortedDays = Array.from(dayMap.values()).sort(
+      (a, b) => parseISO(a.date).getTime() - parseISO(b.date).getTime()
+    );
+
+    // Build overdue group
+    let overdueGroup: IncomingDay | null = null;
+    if (overduePayments.length > 0) {
+      overdueGroup = {
+        date: 'overdue',
+        label: 'OVERDUE',
+        payments: overduePayments.map((p) => ({ ...p, orderProgress: getProgress(p) })),
+        dayTotal: overduePayments.reduce((sum, p) => sum + p.amount, 0),
+      };
+    }
+
+    const overdueTotal = overduePayments.reduce((sum, p) => sum + p.amount, 0);
+    const upcomingTotal = upcoming.reduce((sum, p) => sum + p.amount, 0);
+
+    return {
+      days: sortedDays,
+      overdue: overdueGroup,
+      grandTotal: upcomingTotal + overdueTotal,
+      overdueTotal,
+      paymentCount: upcoming.length + overduePayments.length,
+    };
+  }, [payments, days]);
+}
+
+/**
+ * Risk cluster — a group of payments that fall close together
+ */
+export interface RiskCluster {
+  startDate: string;
+  endDate: string;
+  payments: Payment[];
+  totalAmount: number;
+  daySpan: number;
+}
+
+/**
+ * Detect risk clusters: groups of 2+ payments falling within windowDays of each other.
+ */
+export function useRiskClusters(windowDays: number = 3): RiskCluster[] {
+  const payments = useBNPLStore((state) => state.payments);
+
+  return useMemo(() => {
+    const today = startOfDay(new Date());
+    const lookahead = endOfDay(addDays(today, 30));
+
+    // Get upcoming unpaid payments within 30 days
+    const upcoming = payments
+      .filter((p) => {
+        if (p.status === 'paid') return false;
+        const d = parseISO(p.dueDate);
+        return !isBefore(d, today) && isWithinInterval(d, { start: today, end: lookahead });
+      })
+      .sort((a, b) => parseISO(a.dueDate).getTime() - parseISO(b.dueDate).getTime());
+
+    if (upcoming.length < 2) return [];
+
+    // Sliding window clustering
+    const clusters: RiskCluster[] = [];
+    let i = 0;
+
+    while (i < upcoming.length) {
+      const clusterPayments = [upcoming[i]];
+      const clusterStart = parseISO(upcoming[i].dueDate);
+      let j = i + 1;
+
+      while (j < upcoming.length) {
+        const d = parseISO(upcoming[j].dueDate);
+        if (differenceInDays(d, clusterStart) <= windowDays) {
+          clusterPayments.push(upcoming[j]);
+          j++;
+        } else {
+          break;
+        }
+      }
+
+      if (clusterPayments.length >= 2) {
+        const startDate = clusterPayments[0].dueDate.split('T')[0];
+        const endDate = clusterPayments[clusterPayments.length - 1].dueDate.split('T')[0];
+        clusters.push({
+          startDate,
+          endDate,
+          payments: clusterPayments,
+          totalAmount: clusterPayments.reduce((sum, p) => sum + p.amount, 0),
+          daySpan: differenceInDays(parseISO(endDate), parseISO(startDate)),
+        });
+      }
+
+      // Move past this cluster
+      i = j > i + 1 ? j : i + 1;
+    }
+
+    return clusters;
+  }, [payments, windowDays]);
+}
+
+// ─── Sprint 2: Paycheck Integration ──────────────────────────────────────────
+
+/**
+ * Generate paycheck dates within a date range.
+ */
+function generatePaydates(
+  nextPayday: string,
+  frequency: 'weekly' | 'biweekly' | 'monthly',
+  rangeStart: Date,
+  rangeEnd: Date
+): Date[] {
+  const dates: Date[] = [];
+  let current = startOfDay(parseISO(nextPayday));
+
+  // Walk backwards to find first paydate before rangeStart
+  const stepBack = frequency === 'weekly' ? 7 : frequency === 'biweekly' ? 14 : 30;
+  while (isAfter(current, rangeStart)) {
+    current = addDays(current, -stepBack);
+  }
+  // Now walk forward
+  current = addDays(current, stepBack);
+
+  while (!isAfter(current, rangeEnd)) {
+    if (!isBefore(current, rangeStart)) {
+      dates.push(new Date(current));
+    }
+    if (frequency === 'weekly') current = addWeeks(current, 1);
+    else if (frequency === 'biweekly') current = addWeeks(current, 2);
+    else current = addDays(current, 30); // approx monthly
+  }
+  return dates;
+}
+
+/**
+ * Pay period breakdown — for each upcoming pay period, show income vs BNPL due.
+ */
+export interface PayPeriod {
+  payDate: string; // ISO date
+  payDateLabel: string; // "MAR 14 (FRI)"
+  income: number; // cents
+  bnplDue: number; // cents
+  remaining: number; // income - bnplDue
+  payments: Payment[];
+}
+
+export function usePayPeriodBreakdown(periodsAhead: number = 4): PayPeriod[] {
+  const paycheckSettings = useBNPLStore((state) => state.paycheckSettings);
+  const payments = useBNPLStore((state) => state.payments);
+
+  return useMemo(() => {
+    if (!paycheckSettings) return [];
+
+    const today = startOfDay(new Date());
+    const lookahead = addDays(today, periodsAhead * 35); // generous lookahead
+
+    const paydates = generatePaydates(
+      paycheckSettings.nextPayday,
+      paycheckSettings.frequency,
+      today,
+      lookahead
+    ).slice(0, periodsAhead);
+
+    if (paydates.length === 0) return [];
+
+    // Get all unpaid payments
+    const unpaid = payments.filter((p) => p.status !== 'paid');
+
+    return paydates.map((payDate, i) => {
+      const periodStart = i === 0 ? today : paydates[i - 1];
+      const periodEnd = payDate;
+
+      // Payments due in this period (between previous paydate and this one)
+      const periodPayments = unpaid.filter((p) => {
+        const d = startOfDay(parseISO(p.dueDate));
+        return isAfter(d, periodStart) && !isAfter(d, periodEnd);
+      });
+
+      const bnplDue = periodPayments.reduce((sum, p) => sum + p.amount, 0);
+
+      return {
+        payDate: payDate.toISOString(),
+        payDateLabel: format(payDate, 'MMM dd (EEE)').toUpperCase(),
+        income: paycheckSettings.amount,
+        bnplDue,
+        remaining: paycheckSettings.amount - bnplDue,
+        payments: periodPayments,
+      };
+    });
+  }, [paycheckSettings, payments, periodsAhead]);
+}
+
+/**
+ * Safe to spend — paycheck minus BNPL due before next paycheck.
+ */
+export function useSafeToSpend(): {
+  amount: number; // cents remaining
+  nextPayday: string | null;
+  bnplDueBeforePayday: number;
+  income: number;
+} {
+  const paycheckSettings = useBNPLStore((state) => state.paycheckSettings);
+  const payments = useBNPLStore((state) => state.payments);
+
+  return useMemo(() => {
+    if (!paycheckSettings) {
+      return { amount: 0, nextPayday: null, bnplDueBeforePayday: 0, income: 0 };
+    }
+
+    const today = startOfDay(new Date());
+    const lookahead = addDays(today, 60);
+    const paydates = generatePaydates(
+      paycheckSettings.nextPayday,
+      paycheckSettings.frequency,
+      today,
+      lookahead
+    );
+
+    if (paydates.length < 2) {
+      return { amount: paycheckSettings.amount, nextPayday: null, bnplDueBeforePayday: 0, income: paycheckSettings.amount };
+    }
+
+    const nextPayday = paydates[0];
+    const followingPayday = paydates[1];
+
+    // Payments due between now and following paydate (the current pay period)
+    const unpaid = payments.filter((p) => {
+      if (p.status === 'paid') return false;
+      const d = startOfDay(parseISO(p.dueDate));
+      return !isBefore(d, today) && isBefore(d, followingPayday);
+    });
+
+    const bnplDue = unpaid.reduce((sum, p) => sum + p.amount, 0);
+
+    return {
+      amount: paycheckSettings.amount - bnplDue,
+      nextPayday: nextPayday.toISOString(),
+      bnplDueBeforePayday: bnplDue,
+      income: paycheckSettings.amount,
+    };
+  }, [paycheckSettings, payments]);
+}
+
+/**
+ * Financial runway — total needed to cover next N days of payments.
+ */
+export function useFinancialRunway(days: number = 30): {
+  totalNeeded: number;
+  paymentCount: number;
+  daysCount: number;
+} {
+  const payments = useBNPLStore((state) => state.payments);
+
+  return useMemo(() => {
+    const today = startOfDay(new Date());
+    const end = endOfDay(addDays(today, days));
+
+    const upcoming = payments.filter((p) => {
+      if (p.status === 'paid') return false;
+      const d = parseISO(p.dueDate);
+      return !isBefore(d, today) && !isAfter(d, end);
+    });
+
+    return {
+      totalNeeded: upcoming.reduce((sum, p) => sum + p.amount, 0),
+      paymentCount: upcoming.length,
+      daysCount: days,
+    };
+  }, [payments, days]);
+}
+
+/**
+ * Savings impact — what % of income goes to BNPL per pay period.
+ */
+export function useSavingsImpact(): {
+  currentPeriodPercent: number;
+  averagePercent: number;
+} {
+  const payPeriods = usePayPeriodBreakdown(4);
+  const paycheckSettings = useBNPLStore((state) => state.paycheckSettings);
+
+  return useMemo(() => {
+    if (!paycheckSettings || paycheckSettings.amount === 0 || payPeriods.length === 0) {
+      return { currentPeriodPercent: 0, averagePercent: 0 };
+    }
+
+    const currentPeriodPercent = payPeriods[0]
+      ? (payPeriods[0].bnplDue / paycheckSettings.amount) * 100
+      : 0;
+
+    const totalBnpl = payPeriods.reduce((sum, p) => sum + p.bnplDue, 0);
+    const totalIncome = payPeriods.length * paycheckSettings.amount;
+    const averagePercent = totalIncome > 0 ? (totalBnpl / totalIncome) * 100 : 0;
+
+    return { currentPeriodPercent, averagePercent };
+  }, [payPeriods, paycheckSettings]);
+}
+
+/**
+ * Free credit alerts — platforms that recently had orders complete, freeing up credit.
+ */
+export interface FreeCreditAlert {
+  platformId: PlatformId;
+  platformName: string;
+  platformColor: string;
+  available: number; // cents
+  percentage: number; // utilization %
+}
+
+export function useFreeCreditAlerts(): FreeCreditAlert[] {
+  const platforms = useBNPLStore((state) => state.platforms);
+  const utilizations = useAllPlatformUtilizations();
+
+  return useMemo(() => {
+    return utilizations
+      .filter((u) => u.limit > 0 && u.percentage < 50) // Under 50% utilization = has free credit
+      .map((u) => {
+        const platform = platforms.find((p) => p.id === u.platformId);
+        if (!platform) return null;
+        return {
+          platformId: u.platformId,
+          platformName: platform.name,
+          platformColor: platform.color,
+          available: u.available,
+          percentage: u.percentage,
+        };
+      })
+      .filter((a): a is FreeCreditAlert => a !== null)
+      .sort((a, b) => b.available - a.available);
+  }, [platforms, utilizations]);
+}
+
+// ─── Sprint 3: Intelligence Features ──────────────────────────────────────────
+
+/**
+ * Post-payoff projection — what happens when each active order completes
+ */
+export interface PostPayoffProjection {
+  orderId: string;
+  storeName: string;
+  platformId: PlatformId;
+  platformName: string;
+  platformColor: string;
+  completionDate: string; // ISO date of last payment
+  amountFreed: number; // cents remaining on order
+  currentUtilization: number; // platform % now
+  projectedUtilization: number; // platform % after payoff
+  projectedAvailable: number; // cents available after payoff
+}
+
+export function usePostPayoffProjections(): PostPayoffProjection[] {
+  const orders = useBNPLStore((state) => state.orders);
+  const payments = useBNPLStore((state) => state.payments);
+  const platforms = useBNPLStore((state) => state.platforms);
+
+  return useMemo(() => {
+    const activeOrders = orders.filter((o) => o.status === 'active');
+
+    return activeOrders
+      .map((order) => {
+        const platform = platforms.find((p) => p.id === order.platformId);
+        if (!platform || platform.creditLimit === 0) return null;
+
+        const orderPayments = payments.filter((p) => p.orderId === order.id);
+        const unpaidAmount = orderPayments
+          .filter((p) => p.status !== 'paid')
+          .reduce((sum, p) => sum + p.amount, 0);
+
+        if (unpaidAmount === 0) return null;
+
+        // Last unpaid payment due date = completion date
+        const lastDueDate = orderPayments
+          .filter((p) => p.status !== 'paid')
+          .sort((a, b) => parseISO(b.dueDate).getTime() - parseISO(a.dueDate).getTime())[0]
+          ?.dueDate;
+
+        if (!lastDueDate) return null;
+
+        // Current platform utilization
+        const platformUsed = payments
+          .filter((p) => p.platformId === order.platformId && p.status !== 'paid')
+          .reduce((sum, p) => sum + p.amount, 0);
+
+        const currentUtil = (platformUsed / platform.creditLimit) * 100;
+        const projectedUsed = platformUsed - unpaidAmount;
+        const projectedUtil = (projectedUsed / platform.creditLimit) * 100;
+
+        return {
+          orderId: order.id,
+          storeName: order.storeName || 'Unknown',
+          platformId: order.platformId,
+          platformName: platform.name,
+          platformColor: platform.color,
+          completionDate: lastDueDate.split('T')[0],
+          amountFreed: unpaidAmount,
+          currentUtilization: Math.round(currentUtil),
+          projectedUtilization: Math.round(Math.max(0, projectedUtil)),
+          projectedAvailable: platform.creditLimit - projectedUsed,
+        };
+      })
+      .filter((p): p is PostPayoffProjection => p !== null)
+      .sort((a, b) => parseISO(a.completionDate).getTime() - parseISO(b.completionDate).getTime());
+  }, [orders, payments, platforms]);
+}
+
+/**
+ * Computed notification — aggregated alerts from all sources
+ */
+export type NotificationType = 'overdue' | 'risk_cluster' | 'free_credit' | 'streak' | 'due_today' | 'high_utilization';
+
+export interface ComputedNotification {
+  id: string;
+  type: NotificationType;
+  severity: 'critical' | 'warning' | 'info';
+  title: string;
+  message: string;
+  platformColor?: string;
+  orderId?: string;
+}
+
+export function useComputedNotifications(): ComputedNotification[] {
+  const overduePayments = useOverduePayments();
+  const riskClusters = useRiskClusters(3);
+  const freeCreditAlerts = useFreeCreditAlerts();
+  const onTimeStreak = useOnTimeStreak();
+  const incoming = useIncomingPayments(1);
+  const creditUtil = useOverallCreditUtilization();
+  const platforms = useBNPLStore((state) => state.platforms);
+  const orders = useBNPLStore((state) => state.orders);
+
+  return useMemo(() => {
+    const notifications: ComputedNotification[] = [];
+
+    // 1. Overdue payments (critical)
+    for (const payment of overduePayments) {
+      const platform = platforms.find((p) => p.id === payment.platformId);
+      const order = orders.find((o) => o.id === payment.orderId);
+      notifications.push({
+        id: `overdue-${payment.id}`,
+        type: 'overdue',
+        severity: 'critical',
+        title: 'OVERDUE PAYMENT',
+        message: `${formatCurrency(payment.amount)} on ${platform?.name || 'Unknown'}${order?.storeName ? ` — ${order.storeName}` : ''}`,
+        platformColor: platform?.color,
+        orderId: payment.orderId,
+      });
+    }
+
+    // 2. Payments due today (warning)
+    if (incoming.days.length > 0) {
+      const todayKey = new Date().toISOString().split('T')[0];
+      const todayGroup = incoming.days.find((d) => d.date === todayKey);
+      if (todayGroup) {
+        for (const p of todayGroup.payments) {
+          const platform = platforms.find((pl) => pl.id === p.platformId);
+          notifications.push({
+            id: `today-${p.id}`,
+            type: 'due_today',
+            severity: 'warning',
+            title: 'DUE TODAY',
+            message: `${formatCurrency(p.amount)} on ${platform?.name || 'Unknown'}`,
+            platformColor: platform?.color,
+            orderId: p.orderId,
+          });
+        }
+      }
+    }
+
+    // 3. Risk clusters (warning)
+    for (const cluster of riskClusters) {
+      notifications.push({
+        id: `cluster-${cluster.startDate}`,
+        type: 'risk_cluster',
+        severity: 'warning',
+        title: 'RISK CLUSTER',
+        message: `${cluster.payments.length} payments totaling ${formatCurrency(cluster.totalAmount)} in ${cluster.daySpan === 0 ? 'same day' : `${cluster.daySpan}D window`}`,
+      });
+    }
+
+    // 4. High utilization (warning if >= 80%)
+    if (creditUtil.percentage >= 80) {
+      notifications.push({
+        id: 'high-util',
+        type: 'high_utilization',
+        severity: 'warning',
+        title: 'HIGH UTILIZATION',
+        message: `Overall credit utilization at ${Math.round(creditUtil.percentage)}%`,
+      });
+    }
+
+    // 5. Streak milestones (info)
+    if ([5, 10, 25, 50, 100].includes(onTimeStreak)) {
+      notifications.push({
+        id: `streak-${onTimeStreak}`,
+        type: 'streak',
+        severity: 'info',
+        title: 'STREAK MILESTONE',
+        message: `${onTimeStreak} consecutive on-time payments`,
+      });
+    }
+
+    // 6. Free credit (info) — only very low utilization (<30%)
+    for (const alert of freeCreditAlerts) {
+      if (alert.percentage < 30) {
+        notifications.push({
+          id: `free-${alert.platformId}`,
+          type: 'free_credit',
+          severity: 'info',
+          title: 'FREE CREDIT',
+          message: `${alert.platformName}: ${formatCurrency(alert.available)} available (${Math.round(100 - alert.percentage)}% free)`,
+          platformColor: alert.platformColor,
+        });
+      }
+    }
+
+    return notifications;
+  }, [overduePayments, riskClusters, freeCreditAlerts, onTimeStreak, incoming, creditUtil, platforms, orders]);
+}
+
+/**
+ * Monthly spending trend (last 6 months)
+ */
+export function useMonthlySpending(): { month: string; label: string; total: number; paid: number }[] {
+  const payments = useBNPLStore((state) => state.payments);
+
+  return useMemo(() => {
+    const now = new Date();
+    const months: { month: string; label: string; total: number; paid: number }[] = [];
+
+    for (let i = 5; i >= 0; i--) {
+      const d = subMonths(now, i);
+      const mStart = startOfMonth(d);
+      const mEnd = endOfMonth(d);
+      const monthKey = format(d, 'yyyy-MM');
+      const label = format(d, 'MMM').toUpperCase();
+
+      const monthPayments = payments.filter((p) => {
+        const due = parseISO(p.dueDate);
+        return isWithinInterval(due, { start: mStart, end: mEnd });
+      });
+
+      const total = monthPayments.reduce((sum, p) => sum + p.amount, 0);
+      const paid = monthPayments
+        .filter((p) => p.status === 'paid')
+        .reduce((sum, p) => sum + p.amount, 0);
+
+      months.push({ month: monthKey, label, total, paid });
+    }
+
+    return months;
+  }, [payments]);
+}
+
+/**
+ * Timeline/Gantt data for active orders
+ */
+export function useTimelineData() {
+  const orders = useBNPLStore((state) => state.orders);
+  const payments = useBNPLStore((state) => state.payments);
+  const platforms = useBNPLStore((state) => state.platforms);
+
+  return useMemo(() => {
+    const activeOrders = orders.filter((o) => o.status === 'active');
+
+    if (activeOrders.length === 0) return null;
+
+    const rows = activeOrders
+      .map((order) => {
+        const orderPayments = payments
+          .filter((p) => p.orderId === order.id)
+          .sort((a, b) => parseISO(a.dueDate).getTime() - parseISO(b.dueDate).getTime());
+        const platform = platforms.find((p) => p.id === order.platformId);
+
+        return {
+          orderId: order.id,
+          storeName: order.storeName || '—',
+          platformName: platform?.name || '',
+          platformColor: platform?.color || '#888',
+          totalAmount: order.totalAmount,
+          payments: orderPayments,
+        };
+      })
+      .filter((r) => r.payments.length > 0);
+
+    if (rows.length === 0) return null;
+
+    const allTimes = rows.flatMap((r) => r.payments.map((p) => parseISO(p.dueDate).getTime()));
+    const today = startOfDay(new Date());
+    allTimes.push(today.getTime());
+
+    const rangeStart = addDays(new Date(Math.min(...allTimes)), -7);
+    const rangeEnd = addDays(new Date(Math.max(...allTimes)), 14);
+    const totalDays = Math.max(differenceInDays(rangeEnd, rangeStart), 1);
+
+    const todayOffset = (differenceInDays(today, rangeStart) / totalDays) * 100;
+
+    return { rows, rangeStart, totalDays, todayOffset };
+  }, [orders, payments, platforms]);
+}
+
+/**
+ * Payoff strategy — snowball (smallest balance first) vs avalanche (highest utilization first)
+ */
+export interface PayoffStep {
+  orderId: string;
+  storeName: string;
+  platformName: string;
+  platformColor: string;
+  remainingBalance: number;
+  platformUtilAfter: number;
+  creditFreed: number;
+}
+
+export function usePayoffStrategies(): { snowball: PayoffStep[]; avalanche: PayoffStep[] } {
+  const orders = useBNPLStore((state) => state.orders);
+  const payments = useBNPLStore((state) => state.payments);
+  const platforms = useBNPLStore((state) => state.platforms);
+
+  return useMemo(() => {
+    const activeOrders = orders.filter((o) => o.status === 'active');
+
+    const orderBalances = activeOrders.map((order) => {
+      const remaining = payments
+        .filter((p) => p.orderId === order.id && p.status !== 'paid')
+        .reduce((sum, p) => sum + p.amount, 0);
+      const platform = platforms.find((p) => p.id === order.platformId);
+      const platformUsed = payments
+        .filter((p) => p.platformId === order.platformId && p.status !== 'paid')
+        .reduce((sum, p) => sum + p.amount, 0);
+      const platformLimit = platform?.creditLimit || 0;
+      const utilization = platformLimit > 0 ? (platformUsed / platformLimit) * 100 : 0;
+
+      return {
+        orderId: order.id,
+        storeName: order.storeName || '—',
+        platformName: platform?.name || '',
+        platformColor: platform?.color || '#888',
+        platformId: order.platformId,
+        remainingBalance: remaining,
+        platformLimit,
+        platformUsed,
+        utilization,
+      };
+    }).filter((o) => o.remainingBalance > 0);
+
+    const buildSteps = (sorted: typeof orderBalances): PayoffStep[] => {
+      let usedByPlatform: Record<string, number> = {};
+      for (const o of orderBalances) {
+        usedByPlatform[o.platformId] = o.platformUsed;
+      }
+
+      return sorted.map((o) => {
+        const freed = o.remainingBalance;
+        usedByPlatform[o.platformId] = (usedByPlatform[o.platformId] || 0) - freed;
+        const newUsed = Math.max(0, usedByPlatform[o.platformId]);
+        const utilAfter = o.platformLimit > 0 ? (newUsed / o.platformLimit) * 100 : 0;
+
+        return {
+          orderId: o.orderId,
+          storeName: o.storeName,
+          platformName: o.platformName,
+          platformColor: o.platformColor,
+          remainingBalance: o.remainingBalance,
+          platformUtilAfter: Math.round(utilAfter),
+          creditFreed: freed,
+        };
+      });
+    };
+
+    const snowball = buildSteps([...orderBalances].sort((a, b) => a.remainingBalance - b.remainingBalance));
+    const avalanche = buildSteps([...orderBalances].sort((a, b) => b.utilization - a.utilization));
+
+    return { snowball, avalanche };
+  }, [orders, payments, platforms]);
 }

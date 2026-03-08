@@ -873,7 +873,7 @@ export function QuickAddModal() {
         />
 
         {/* Recommended Platforms */}
-        {amountInCents > 0 && topRecommendations.length > 0 && (
+        {amountInCents && amountInCents > 0 && topRecommendations.length > 0 && (
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-2">
               Recommended

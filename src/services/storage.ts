@@ -1,11 +1,26 @@
 import type { Order, Payment, Platform, Subscription, ExportedData, NotificationSettings, LimitChange } from '../types';
+import type { ThemeState } from '../types/theme';
+import type { CalendarEvent } from '../types/calendar';
 import { DEFAULT_PLATFORMS, DEFAULT_SUBSCRIPTIONS } from '../constants/platforms';
+import { DEFAULT_PRESET_ID } from '../constants/themes';
 
 const DB_NAME = 'bnpl-tracker';
 const DB_VERSION = 2; // Bumped for limitHistory store
 const BACKUP_KEY = 'bnpl-tracker-backup';
 const NOTIFICATION_SETTINGS_KEY = 'bnpl-notification-settings';
 const GEMINI_API_KEY_KEY = 'bnpl-gemini-api-key';
+const THEME_SETTINGS_KEY = 'bnpl-theme-settings';
+const CALENDAR_EVENTS_KEY = 'bnpl-calendar-events';
+const PAYCHECK_SETTINGS_KEY = 'bnpl-paycheck-settings';
+const LAST_BRIEFING_DATE_KEY = 'bnpl-last-briefing-date';
+
+export type PaycheckFrequency = 'weekly' | 'biweekly' | 'monthly';
+
+export interface PaycheckSettings {
+  amount: number; // in cents
+  frequency: PaycheckFrequency;
+  nextPayday: string; // ISO date
+}
 
 interface DBSchema {
   orders: Order;
@@ -448,6 +463,95 @@ class StorageService {
       console.log('[Storage] Gemini API key cleared');
     } catch (err) {
       console.warn('[Storage] Failed to clear Gemini API key:', err);
+    }
+  }
+
+  // Theme Settings (stored in localStorage)
+  getThemeSettings(): ThemeState {
+    try {
+      const stored = localStorage.getItem(THEME_SETTINGS_KEY);
+      if (stored) {
+        return JSON.parse(stored) as ThemeState;
+      }
+    } catch (err) {
+      console.warn('[Storage] Failed to read theme settings:', err);
+    }
+    return {
+      activePresetId: DEFAULT_PRESET_ID,
+      customPresets: [],
+    };
+  }
+
+  saveThemeSettings(state: ThemeState): void {
+    try {
+      localStorage.setItem(THEME_SETTINGS_KEY, JSON.stringify(state));
+      console.log('[Storage] Theme settings saved');
+    } catch (err) {
+      console.warn('[Storage] Failed to save theme settings:', err);
+    }
+  }
+
+  // Calendar Events (stored in localStorage)
+  getCalendarEvents(): CalendarEvent[] {
+    try {
+      const stored = localStorage.getItem(CALENDAR_EVENTS_KEY);
+      if (stored) {
+        return JSON.parse(stored) as CalendarEvent[];
+      }
+    } catch (err) {
+      console.warn('[Storage] Failed to read calendar events:', err);
+    }
+    return [];
+  }
+
+  saveCalendarEvents(events: CalendarEvent[]): void {
+    try {
+      localStorage.setItem(CALENDAR_EVENTS_KEY, JSON.stringify(events));
+    } catch (err) {
+      console.warn('[Storage] Failed to save calendar events:', err);
+    }
+  }
+
+  // Paycheck Settings (stored in localStorage)
+  getPaycheckSettings(): PaycheckSettings | null {
+    try {
+      const stored = localStorage.getItem(PAYCHECK_SETTINGS_KEY);
+      if (stored) {
+        return JSON.parse(stored) as PaycheckSettings;
+      }
+    } catch (err) {
+      console.warn('[Storage] Failed to read paycheck settings:', err);
+    }
+    return null;
+  }
+
+  savePaycheckSettings(settings: PaycheckSettings | null): void {
+    try {
+      if (settings) {
+        localStorage.setItem(PAYCHECK_SETTINGS_KEY, JSON.stringify(settings));
+      } else {
+        localStorage.removeItem(PAYCHECK_SETTINGS_KEY);
+      }
+    } catch (err) {
+      console.warn('[Storage] Failed to save paycheck settings:', err);
+    }
+  }
+
+  // Last Briefing Date (stored in localStorage)
+  getLastBriefingDate(): string | null {
+    try {
+      return localStorage.getItem(LAST_BRIEFING_DATE_KEY);
+    } catch (err) {
+      console.warn('[Storage] Failed to read last briefing date:', err);
+      return null;
+    }
+  }
+
+  saveLastBriefingDate(date: string): void {
+    try {
+      localStorage.setItem(LAST_BRIEFING_DATE_KEY, date);
+    } catch (err) {
+      console.warn('[Storage] Failed to save last briefing date:', err);
     }
   }
 

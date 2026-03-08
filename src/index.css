@@ -3,6 +3,22 @@
 @tailwind utilities;
 
 :root {
+  /* Theme color defaults (Amber Terminal) */
+  --color-accent: #FFB000;
+  --color-accent-rgb: 255 176 0;
+  --color-bg: #0B0E11;
+  --color-bg-rgb: 11 14 17;
+  --color-card: #0F1215;
+  --color-card-rgb: 15 18 21;
+  --color-text: #C8CCD0;
+  --color-text-rgb: 200 204 208;
+  --color-border: #1E2328;
+  --color-border-rgb: 30 35 40;
+  --color-hover: #181D22;
+  --color-hover-rgb: 24 29 34;
+  --color-muted: #6B7280;
+  --color-muted-rgb: 107 114 128;
+
   font-family: 'JetBrains Mono', monospace;
   font-size: 13px;
   line-height: 1.5;
@@ -19,8 +35,8 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background: #0B0E11;
-  color: #C8CCD0;
+  background: var(--color-bg);
+  color: var(--color-text);
 }
 
 * {
@@ -34,15 +50,15 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #0B0E11;
+  background: var(--color-bg);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1E2328;
+  background: var(--color-border);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #2A3038;
+  background: var(--color-hover);
 }
 
 input[type="date"]::-webkit-calendar-picker-indicator {
@@ -55,7 +71,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #6B7280;
+  color: var(--color-muted);
 }
 
 /* Toast animation */
@@ -122,7 +138,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 .terminal-cursor::after {
   content: '▊';
-  color: #FFB000;
+  color: var(--color-accent);
   animation: blink 1s step-end infinite;
   margin-left: 2px;
   font-size: 0.8em;
@@ -147,27 +163,100 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 /* Row hover glow */
 .row-glow:hover {
-  background: rgba(255, 176, 0, 0.03);
+  background: rgb(var(--color-accent-rgb) / 0.03);
 }
 
 /* Section divider line */
 .section-rule {
   height: 1px;
-  background: linear-gradient(90deg, #1E2328, #FFB000 50%, #1E2328);
+  background: linear-gradient(90deg, var(--color-border), var(--color-accent) 50%, var(--color-border));
   opacity: 0.3;
+}
+
+/* ─── HUD Section Borders ─── */
+.hud-section {
+  position: relative;
+  border: 1px solid var(--color-border);
+  background: var(--color-card);
+}
+
+.hud-section::before,
+.hud-section::after {
+  content: '';
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-color: var(--color-accent);
+  opacity: 0.5;
+}
+
+.hud-section::before {
+  top: -1px;
+  left: -1px;
+  border-top: 2px solid;
+  border-left: 2px solid;
+}
+
+.hud-section::after {
+  top: -1px;
+  right: -1px;
+  border-top: 2px solid;
+  border-right: 2px solid;
+}
+
+/* Bottom corners via inner pseudo (applied via child element) */
+.hud-section-inner::before,
+.hud-section-inner::after {
+  content: '';
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-color: var(--color-accent);
+  opacity: 0.5;
+  bottom: -1px;
+}
+
+.hud-section-inner::before {
+  left: -1px;
+  border-bottom: 2px solid;
+  border-left: 2px solid;
+}
+
+.hud-section-inner::after {
+  right: -1px;
+  border-bottom: 2px solid;
+  border-right: 2px solid;
+}
+
+/* Status indicator dot */
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50% !important;
+  display: inline-block;
+}
+
+.status-dot-pulse {
+  animation: subtle-pulse 2s ease-in-out infinite;
+}
+
+/* Cluster alert styling */
+.cluster-alert {
+  border-left: 2px solid var(--color-accent);
+  background: rgb(var(--color-accent-rgb) / 0.05);
 }
 
 /* ─── Mobile Optimizations ─── */
 @media (max-width: 639px) {
   :root {
-    font-size: 15px;
+    font-size: 16px;
     line-height: 1.6;
   }
 
   .terminal-label {
-    font-size: 12px;
+    font-size: 13px;
     padding-left: 8px;
-    border-left: 2px solid #FFB000;
+    border-left: 2px solid var(--color-accent);
   }
 
   /* Bump tiny text for readability */
@@ -178,4 +267,5 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   /* Hide scrollbar on swipeable tab strips */
   .scrollbar-hide::-webkit-scrollbar { display: none; }
   .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
 }

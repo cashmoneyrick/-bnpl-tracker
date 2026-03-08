@@ -53,18 +53,19 @@ export function Modal({
       />
 
       {/* Modal */}
-      <div className="flex min-h-full items-center justify-center p-4">
+      <div className="flex min-h-full items-center justify-center p-0 sm:p-4">
         <div
           className={`
             relative w-full ${sizes[size]}
-            bg-dark-card border border-dark-border rounded-xl
+            bg-dark-card border-0 sm:border sm:border-dark-border
             shadow-xl transform transition-all
+            min-h-screen sm:min-h-0
           `}
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
           {title && (
-            <div className="flex items-center justify-between px-6 py-4 border-b border-dark-border">
+            <div className="flex items-center justify-between px-4 py-3 sm:px-6 sm:py-4 border-b border-dark-border">
               <h2 className="text-lg font-semibold text-white">{title}</h2>
               <button
                 onClick={onClose}
@@ -88,7 +89,7 @@ export function Modal({
           )}
 
           {/* Content */}
-          <div className={title ? 'p-6' : 'p-6'}>{children}</div>
+          <div className={title ? 'p-3 sm:p-6' : 'p-3 sm:p-6'}>{children}</div>
         </div>
       </div>
     </div>
